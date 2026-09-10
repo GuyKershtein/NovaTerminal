@@ -25,14 +25,14 @@ namespace NovaTerminal.Terminal;
 /// ownership model is what lets the hot path run without a single lock.
 /// </para>
 /// </remarks>
-public sealed class TerminalState
+public sealed partial class TerminalState
 {
     private TerminalCursorState? _savedCursor;
 
     /// <summary>Creates a blank terminal of the given size.</summary>
     public TerminalState(TerminalSize size)
     {
-        Buffer = new TerminalBuffer(size);
+        _primaryBuffer = new TerminalBuffer(size);
         Cursor = new TerminalCursor();
         TabStops = new TabStops(size.Columns);
         ScrollRegion = ScrollRegion.FullScreen(size);
@@ -44,8 +44,11 @@ public sealed class TerminalState
     {
     }
 
-    /// <summary>The screen contents.</summary>
-    public TerminalBuffer Buffer { get; }
+    /// <summary>
+    /// The screen currently being displayed, which is the alternate screen while a full-screen
+    /// program is running and the primary screen otherwise.
+    /// </summary>
+    public TerminalBuffer Buffer => _alternateBuffer ?? _primaryBuffer;
 
     /// <summary>Where the next character goes.</summary>
     public TerminalCursor Cursor { get; }
@@ -103,6 +106,8 @@ public sealed class TerminalState
     /// </remarks>
     public void Print(Rune rune)
     {
+        rune = TranslateForCharacterSet(rune);
+
         var width = CharacterWidth.Measure(rune);
 
         if (width == CharacterWidth.ZeroWidth)
@@ -216,9 +221,17 @@ public sealed class TerminalState
 
     /// <summary>Moves the cursor to an absolute position, clamped to the screen.</summary>
     public void MoveCursorTo(int column, int row)
-        => Cursor.MoveTo(
+    {
+        // With origin mode set the cursor may not leave the scrolling region at all, which is what
+        // lets a program treat the region as if it were the whole screen.
+        var (lowestRow, highestRow) = OriginMode
+            ? (ScrollRegion.Top, ScrollRegion.Bottom)
+            : (0, Size.Rows - 1);
+
+        Cursor.MoveTo(
             Math.Clamp(column, 0, Size.Columns - 1),
-            Math.Clamp(row, 0, Size.Rows - 1));
+            Math.Clamp(row, lowestRow, highestRow));
+    }
 
     /// <summary>Moves the cursor to a column on its current row.</summary>
     public void MoveCursorToColumn(int column) => MoveCursorTo(column, Cursor.Row);
@@ -441,7 +454,8 @@ public sealed class TerminalState
             }
         }
 
-        Buffer.Resize(size, CellStyle.Default);
+        _primaryBuffer.Resize(size, CellStyle.Default);
+        _alternateBuffer?.Resize(size, CellStyle.Default);
         TabStops.Resize(size.Columns);
         ScrollRegion = ScrollRegion.FullScreen(size);
 
@@ -459,6 +473,13 @@ public sealed class TerminalState
         AutoWrap = true;
         ApplicationCursorKeys = false;
         ApplicationKeypad = false;
+        BracketedPaste = false;
+        OriginMode = false;
+        InsertMode = false;
+        G0CharacterSet = CharacterSet.UsAscii;
+        G1CharacterSet = CharacterSet.UsAscii;
+        UsingG1 = false;
+        DisableAlternateScreen(restoreCursor: false);
         _savedCursor = null;
 
         Buffer.Clear(CellStyle.Default);
@@ -505,6 +526,12 @@ public sealed class TerminalState
         if (width == CharacterWidth.DoubleWidth)
         {
             BreakWideCharacterAt(column + 1, row);
+        }
+
+        if (InsertMode)
+        {
+            // Insert mode pushes the rest of the line right instead of overwriting it.
+            Buffer.InsertCells(row, column, width, EraseStyle);
         }
 
         var role = width == CharacterWidth.DoubleWidth ? CellRole.WideLeading : CellRole.Normal;

@@ -26,7 +26,7 @@ repository — nothing is listed as working until it is implemented and tested.
 | 4 | Terminal view and GUI | ✅ Done |
 | 5, 8 | ConPTY shell backend | ✅ Done |
 | 6 | Shell ↔ terminal wiring, keyboard input | ✅ Done |
-| 7 | Colours, cursor movement, clearing, scrolling | ⏳ Next |
+| 7 | Alternate screen, character sets, modes | ✅ Done |
 | 9 | Resize support | ⬜ Planned |
 | 10–18 | Copy/paste, scrollback, tabs, search, themes, performance, polish | ⬜ Planned |
 

@@ -7,6 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestone 7: terminal features
+
+- Alternate screen buffer (modes 1049, 1047 and 47), so a full-screen program can take over the
+  display and hand back exactly what was there before.
+- DEC Special Graphics character set with G0/G1 designation and shift in/out, which is how
+  text-mode programs draw borders.
+- Origin mode (DECOM): positioning relative to the scrolling region, with the cursor confined to it.
+- Insert mode (IRM), cursor shape selection (DECSCUSR), bracketed paste mode, save/restore cursor
+  through mode 1048, and the screen alignment pattern (DECALN).
+- 25 further tests.
+
 ### Added — Milestones 5, 6 and 8: the shell
 
 Milestones 5 and 8 were implemented together: ConPTY is the only correct way to launch an

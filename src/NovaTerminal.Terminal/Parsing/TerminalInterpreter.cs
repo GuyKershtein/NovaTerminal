@@ -40,8 +40,16 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
     private const int TabulationClearAll = 3;
 
     private const int ModeApplicationCursorKeys = 1;
+    private const int ModeOrigin = 6;
     private const int ModeAutoWrap = 7;
     private const int ModeCursorVisible = 25;
+    private const int ModeAlternateScreenLegacy = 47;
+    private const int ModeAlternateScreenClearing = 1047;
+    private const int ModeSaveCursor = 1048;
+    private const int ModeAlternateScreenFull = 1049;
+    private const int ModeBracketedPaste = 2004;
+
+    private const int ModeInsertReplace = 4;
 
     private const int OscSetIconAndTitle = 0;
     private const int OscSetIconName = 1;
@@ -109,9 +117,17 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
             case VtConstants.CarriageReturn:
                 _terminal.CarriageReturn();
                 break;
+            case VtConstants.ShiftOut:
+                // Shift out selects G1, shift in selects G0. Programs pair them around box-drawing
+                // runs: shift out, draw the border, shift back.
+                _terminal.UsingG1 = true;
+                break;
+            case VtConstants.ShiftIn:
+                _terminal.UsingG1 = false;
+                break;
             default:
-                // NUL, SO, SI and the rest have no effect here. They are common enough in real
-                // output that reporting them would be noise rather than information.
+                // NUL and the rest have no effect here. They are common enough in real output that
+                // reporting them would be noise rather than information.
                 break;
         }
     }
@@ -121,9 +137,7 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
     {
         if (intermediate != CsiSequence.None)
         {
-            // Character set designation such as "ESC ( B". NovaTerminal assumes UTF-8, so these are
-            // recognised and ignored rather than acted on.
-            ReportUnsupported(SequenceKind.Escape, final, intermediate, CsiSequence.None);
+            DispatchEscapeWithIntermediate(final, intermediate);
             return;
         }
 
@@ -177,6 +191,12 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
 
         if (sequence.Intermediate != CsiSequence.None)
         {
+            if (sequence.Intermediate == ' ' && sequence.Final == CursorStyleFinal)
+            {
+                SetCursorStyle(sequence.GetOrDefault(0, 0));
+                return;
+            }
+
             ReportUnsupported(SequenceKind.Csi, sequence.Final, sequence.Intermediate, CsiSequence.None);
             return;
         }
@@ -212,16 +232,17 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
                 _terminal.MoveCursorToColumn(ToZeroBased(sequence.GetOrDefault(0, 1)));
                 break;
             case CsiFinal.VerticalPositionAbsolute:
-                _terminal.MoveCursorToRow(ToZeroBased(sequence.GetOrDefault(0, 1)));
+                _terminal.MoveCursorToRow(_terminal.ResolveRow(sequence.GetOrDefault(0, 1)));
                 break;
 
             case CsiFinal.CursorPosition:
             case CsiFinal.HorizontalVerticalPosition:
                 // Parameters are row then column, both one-based - the opposite order to the
                 // engine's (column, row) convention, and the classic source of off-by-one bugs.
+                // Under origin mode the row is also relative to the scrolling region.
                 _terminal.MoveCursorTo(
                     ToZeroBased(sequence.GetOrDefault(1, 1)),
-                    ToZeroBased(sequence.GetOrDefault(0, 1)));
+                    _terminal.ResolveRow(sequence.GetOrDefault(0, 1)));
                 break;
 
             case CsiFinal.CursorForwardTabulation:
@@ -289,8 +310,7 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
 
             case CsiFinal.SetMode:
             case CsiFinal.ResetMode:
-                // Standard (non-private) modes such as insert mode are not implemented.
-                ReportUnsupported(SequenceKind.Csi, sequence.Final, CsiSequence.None, CsiSequence.None);
+                DispatchStandardMode(in sequence);
                 break;
 
             default:
@@ -332,6 +352,116 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
         }
     }
 
+    /// <summary>
+    /// Handles escape sequences that carry an intermediate byte: character set designation and the
+    /// screen alignment pattern.
+    /// </summary>
+    private void DispatchEscapeWithIntermediate(char final, char intermediate)
+    {
+        switch (intermediate)
+        {
+            // "ESC ( x" designates a set into G0, "ESC ) x" into G1.
+            case '(':
+            case ')':
+                {
+                    var slot = intermediate == '(' ? 0 : 1;
+
+                    var characterSet = final switch
+                    {
+                        '0' => CharacterSet.DecSpecialGraphics,
+                        'B' => CharacterSet.UsAscii,
+                        _ => (CharacterSet?)null,
+                    };
+
+                    if (characterSet is { } selected)
+                    {
+                        _terminal.DesignateCharacterSet(slot, selected);
+                    }
+                    else
+                    {
+                        // Any other national set is treated as ASCII: the alternative is mangling text
+                        // that is almost certainly UTF-8 in practice.
+                        _terminal.DesignateCharacterSet(slot, CharacterSet.UsAscii);
+                        ReportUnsupported(SequenceKind.Escape, final, intermediate, CsiSequence.None);
+                    }
+
+                    return;
+                }
+
+            case '#' when final == '8':
+                _terminal.ScreenAlignmentPattern();
+                return;
+
+            default:
+                ReportUnsupported(SequenceKind.Escape, final, intermediate, CsiSequence.None);
+                return;
+        }
+    }
+
+    /// <summary>Final byte of DECSCUSR, which selects the cursor shape.</summary>
+    private const char CursorStyleFinal = 'q';
+
+    /// <summary>Applies the cursor shape selected by <c>DECSCUSR</c>.</summary>
+    /// <remarks>
+    /// The parameter encodes shape and blinking together: odd values blink, even values do not, and
+    /// zero means "back to the configured default".
+    /// </remarks>
+    private void SetCursorStyle(int parameter)
+    {
+        var cursor = _terminal.Cursor;
+
+        switch (parameter)
+        {
+            case 0:
+            case 1:
+            case 2:
+                cursor.Style = CursorStyle.Block;
+                break;
+            case 3:
+            case 4:
+                cursor.Style = CursorStyle.Underline;
+                break;
+            case 5:
+            case 6:
+                cursor.Style = CursorStyle.Bar;
+                break;
+            default:
+                ReportUnsupported(SequenceKind.Csi, CursorStyleFinal, ' ', CsiSequence.None);
+                break;
+        }
+    }
+
+    /// <summary>Handles the standard, non-private modes.</summary>
+    private void DispatchStandardMode(in CsiSequence sequence)
+    {
+        var isSet = sequence.Final == CsiFinal.SetMode;
+
+        for (var index = 0; index < sequence.Count; index++)
+        {
+            if (sequence[index] == ModeInsertReplace)
+            {
+                _terminal.InsertMode = isSet;
+            }
+            else
+            {
+                ReportUnsupported(SequenceKind.Csi, sequence.Final, CsiSequence.None, CsiSequence.None);
+            }
+        }
+    }
+
+    /// <summary>Switches between the primary and alternate screens.</summary>
+    private void SwitchAlternateScreen(bool enable, bool withCursor)
+    {
+        if (enable)
+        {
+            _terminal.EnableAlternateScreen(withCursor);
+        }
+        else
+        {
+            _terminal.DisableAlternateScreen(withCursor);
+        }
+    }
+
     private void DispatchPrivateMode(in CsiSequence sequence)
     {
         var isSet = sequence.Final == CsiFinal.SetMode;
@@ -350,6 +480,34 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
                     // DECCKM changes what the arrow keys send, so it belongs to input rather than
                     // to the screen; the flag is recorded for the input layer to read.
                     _terminal.ApplicationCursorKeys = isSet;
+                    break;
+                case ModeOrigin:
+                    _terminal.OriginMode = isSet;
+
+                    // Setting or clearing origin mode homes the cursor, which under origin mode
+                    // means the top of the scrolling region rather than the top of the screen.
+                    _terminal.MoveCursorTo(0, isSet ? _terminal.ScrollRegion.Top : 0);
+                    break;
+                case ModeBracketedPaste:
+                    _terminal.BracketedPaste = isSet;
+                    break;
+                case ModeAlternateScreenLegacy:
+                case ModeAlternateScreenClearing:
+                    SwitchAlternateScreen(isSet, withCursor: false);
+                    break;
+                case ModeAlternateScreenFull:
+                    SwitchAlternateScreen(isSet, withCursor: true);
+                    break;
+                case ModeSaveCursor:
+                    if (isSet)
+                    {
+                        _terminal.SaveCursor();
+                    }
+                    else
+                    {
+                        _terminal.RestoreCursor();
+                    }
+
                     break;
                 case ModeAutoWrap:
                     _terminal.AutoWrap = isSet;
