@@ -49,11 +49,25 @@ public sealed class ShellSessionTests
     [Fact]
     public void TheBackendReportsWhatItSupports()
     {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
+
         var backend = ShellBackendFactory.Create();
 
         Assert.Equal("ConPTY", backend.Name);
         Assert.True(backend.IsSupported);
         Assert.True(File.Exists(backend.GetDefaultShellExecutable()));
+    }
+
+    [Fact]
+    public void OnAPlatformWithNoBackendTheFactorySaysSoClearly()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Windows has a backend.");
+
+        // The Unix backend is not written yet. What matters is that the failure names the missing
+        // piece rather than surfacing as something unrelated further down.
+        var exception = Assert.Throws<PlatformNotSupportedException>(() => ShellBackendFactory.Create());
+
+        Assert.Contains("Unix", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
