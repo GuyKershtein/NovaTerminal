@@ -63,6 +63,16 @@ public sealed class TerminalLine
     /// </summary>
     public ReadOnlySpan<TerminalCell> Cells => _cells;
 
+    /// <summary>
+    /// Writes a cell without checking the column, for callers that have already checked it.
+    /// </summary>
+    /// <remarks>
+    /// Internal, and used only by <see cref="TerminalBuffer"/> immediately after it has validated
+    /// the coordinate. Printing is the hottest path in the engine, and it was paying for the same
+    /// bounds check three times over.
+    /// </remarks>
+    internal void SetUnchecked(int column, TerminalCell cell) => _cells[column] = cell;
+
     /// <summary>Erases the whole line, filling it with the given style.</summary>
     public void Clear(CellStyle style)
     {

@@ -33,8 +33,11 @@ public partial class MainWindow : Window, IDisposable
     private readonly NovaTerminalOptions _options;
     private readonly ILogger<MainWindow> _logger;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly TerminalTheme _theme;
+    private readonly ThemeCatalog _themes;
     private readonly List<TerminalTab> _tabs = [];
+
+    private TerminalTheme _theme;
+    private double _fontSize;
 
     private IShellBackend? _backend;
     private TerminalTab? _activeTab;
@@ -57,7 +60,9 @@ public partial class MainWindow : Window, IDisposable
         _options = options;
         _logger = logger;
         _loggerFactory = loggerFactory;
-        _theme = BuiltInThemes.GetOrDefault(options.Appearance.ThemeName);
+        _themes = new ThemeCatalog(options.Themes.AsReadOnly());
+        _theme = _themes.GetOrDefault(options.Appearance.ThemeName);
+        _fontSize = options.Appearance.FontSize;
 
         InitializeComponent();
 
@@ -360,7 +365,32 @@ public partial class MainWindow : Window, IDisposable
                     SelectTabByOffset(shift ? -1 : 1);
                     e.Handled = true;
                     return;
+                case Key.P:
+                    CycleTheme();
+                    e.Handled = true;
+                    return;
             }
+        }
+
+        if (control && e.Key is Key.OemPlus or Key.Add)
+        {
+            AdjustFontSize(1);
+            e.Handled = true;
+            return;
+        }
+
+        if (control && e.Key is Key.OemMinus or Key.Subtract)
+        {
+            AdjustFontSize(-1);
+            e.Handled = true;
+            return;
+        }
+
+        if (control && e.Key == Key.D0)
+        {
+            AdjustFontSize(0);
+            e.Handled = true;
+            return;
         }
 
         if (control && e.Key == Key.Tab)
@@ -390,6 +420,55 @@ public partial class MainWindow : Window, IDisposable
             ClearSearch();
             e.Handled = true;
         }
+    }
+
+    /// <summary>Switches to the next theme, applying it to every open tab.</summary>
+    private void CycleTheme()
+    {
+        _theme = _themes.GetNext(_theme.Name);
+        _options.Appearance.ThemeName = _theme.Name;
+
+        Background = new SolidColorBrush(
+            Color.FromRgb(_theme.Background.Red, _theme.Background.Green, _theme.Background.Blue));
+
+        foreach (var tab in _tabs)
+        {
+            // Cells coloured "default" repaint in the new theme's colours precisely because the
+            // engine stored the intent rather than a resolved colour.
+            tab.View.ColorTheme = _theme;
+        }
+
+        UpdateStatus();
+    }
+
+    /// <summary>
+    /// Changes the font size, or returns it to the configured value when the delta is zero.
+    /// </summary>
+    /// <remarks>
+    /// Resizing the font resizes the terminal: the cell grows, so fewer cells fit, and the shell has
+    /// to be told. That happens automatically, because remeasuring reports a new viewport size
+    /// through the same path a window resize uses.
+    /// </remarks>
+    private void AdjustFontSize(int delta)
+    {
+        var target = delta == 0
+            ? new NovaTerminalOptions().Appearance.FontSize
+            : Math.Clamp(_fontSize + delta, AppearanceOptions.MinFontSize, AppearanceOptions.MaxFontSize);
+
+        if (Math.Abs(target - _fontSize) < double.Epsilon)
+        {
+            return;
+        }
+
+        _fontSize = target;
+        _options.Appearance.FontSize = target;
+
+        foreach (var tab in _tabs)
+        {
+            tab.View.UpdateAppearance(_options.Appearance);
+        }
+
+        UpdateStatus();
     }
 
     private async Task CopyAsync()
@@ -544,7 +623,8 @@ public partial class MainWindow : Window, IDisposable
 
         StatusText.Text = string.Create(
             CultureInfo.InvariantCulture,
-            $"{size.Columns}x{size.Rows}   {scrollback} lines of history   {_tabs.Count} tab(s)   {state}{scrolled}{selection}");
+            $"{size.Columns}x{size.Rows}   {scrollback} lines of history   {_tabs.Count} tab(s)   " +
+            $"{_theme.Name} {_fontSize:0.#}pt   {state}{scrolled}{selection}");
     }
 
     private static string Truncate(string value, int maxLength)

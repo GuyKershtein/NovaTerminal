@@ -27,6 +27,7 @@ internal static class AppServices
 
         var services = new ServiceCollection();
         services.AddSingleton(options);
+        services.AddSingleton(Configuration);
         services.AddSingleton(options.Appearance);
         services.AddSingleton(options.Terminal);
         services.AddSingleton(options.Shell);
@@ -46,16 +47,34 @@ internal static class AppServices
         "NovaTerminal",
         "logs");
 
+    /// <summary>What happened when settings were loaded, for logging once a logger exists.</summary>
+    public static ConfigurationResult Configuration { get; private set; } =
+        new(new NovaTerminalOptions(), ConfigurationStore.DefaultPath, Existed: false, []);
+
     /// <summary>
-    /// Produces the options the application runs with. A file-backed configuration system arrives in
-    /// a later milestone; until then the defaults are the configuration, and they are still routed
-    /// through validation so the startup path is the real one from the beginning.
+    /// Loads the settings file, falling back to defaults for anything missing or invalid.
     /// </summary>
+    /// <remarks>
+    /// A first run leaves a settings file behind, so a user who wants to change something has a
+    /// file to edit rather than having to invent one from the documentation.
+    /// </remarks>
     private static NovaTerminalOptions LoadOptions()
     {
-        var options = new NovaTerminalOptions();
-        options.ThrowIfInvalid();
-        return options;
+        Configuration = ConfigurationStore.Load();
+
+        if (!Configuration.Existed)
+        {
+            try
+            {
+                ConfigurationStore.Save(Configuration.Options);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // A read-only or unwritable profile is not a reason to refuse to start.
+            }
+        }
+
+        return Configuration.Options;
     }
 
     private static void AddLogging(IServiceCollection services)

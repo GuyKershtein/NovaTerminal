@@ -7,6 +7,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestones 14 to 18
+
+- **Configuration** from `%APPDATA%/NovaTerminal/settings.json`, accepting comments and trailing
+  commas, written on first run. A bad file never stops the terminal starting: unparseable files fall
+  back to defaults, individually invalid values fall back on their own, and every problem is
+  reported.
+- **User-defined themes**, which inherit whatever they do not define, so changing one colour of a
+  built-in theme does not mean restating the rest.
+- **Theme cycling and font zoom** from the keyboard. Resizing the font resizes the terminal, because
+  remeasuring reports a new viewport size through the same path a window resize uses.
+- **Benchmarks** (BenchmarkDotNet) for the parser, engine and render model.
+- **Fuzz and robustness tests**: 200 iterations each of random bytes and random escape sequences,
+  asserting nothing throws and the screen invariants hold; plus bounds tests for hostile input.
+- **Release workflow** publishing self-contained x64 and arm64 builds.
+- Full documentation pass: README, architecture decisions, troubleshooting.
+
+### Changed
+
+- Removed redundant bounds checks from the engine's cell-write path, worth 3-12% depending on
+  workload.
+
+### Removed
+
+- A parser fast path for batching printable ASCII. It was measured and made no difference; the
+  parser is only about 13% of the cost of applying output, so the optimisation was aimed at the
+  wrong layer.
+
 ### Added — Milestones 9 to 13
 
 - **Scrollback**: a bounded ring of retained lines that recycles the line it evicts, so scrolling at

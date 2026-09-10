@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Benchmarks must be measured against optimised code; a debug build measures nothing useful. -->
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NovaTerminal.Terminal/NovaTerminal.Terminal.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Rendering/NovaTerminal.Rendering.csproj" />
+  </ItemGroup>
+
+</Project>

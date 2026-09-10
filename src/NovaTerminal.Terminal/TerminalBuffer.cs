@@ -92,8 +92,11 @@ public sealed class TerminalBuffer
     public void SetCell(int column, int row, TerminalCell cell)
     {
         ThrowIfOutOfRange(column, row);
-        _lines[row][column] = cell;
-        MarkRowDirty(row);
+
+        // The coordinate has been checked, so the write and the damage flag skip re-checking it.
+        _lines[row].SetUnchecked(column, cell);
+        _dirtyRows[row] = true;
+        HasDamage = true;
     }
 
     /// <summary>Records whether a row's text continues onto the row below.</summary>

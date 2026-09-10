@@ -19,6 +19,13 @@ public sealed class NovaTerminalOptions
     public TerminalBehaviorOptions Terminal { get; set; } = new();
 
     /// <summary>
+    /// Themes defined by the user, keyed by name. A theme here with the same name as a built-in one
+    /// replaces it, which is how someone tweaks a shipped theme rather than recreating it.
+    /// </summary>
+    public IDictionary<string, ThemeDefinition> Themes { get; set; } =
+        new Dictionary<string, ThemeDefinition>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Checks every section and returns a human-readable description of each problem found.
     /// Returning the errors rather than throwing lets the caller choose between failing fast and
     /// reporting every problem at once, and makes the rules straightforward to unit test.

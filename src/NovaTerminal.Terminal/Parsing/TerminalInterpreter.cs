@@ -94,6 +94,7 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
     /// <inheritdoc />
     public void Print(Rune rune) => _terminal.Print(rune);
 
+
     /// <inheritdoc />
     public void Execute(byte control)
     {

@@ -65,6 +65,14 @@ Every behavioural change needs a test. In particular:
 - **Parser** changes need a test that feeds the sequence *split across multiple chunks*, because
   that is the failure mode real terminals hit and synthetic tests miss.
 - **Bug fixes** start with a failing test that reproduces the bug.
+- **Pseudo-terminal** changes are covered by `tests/NovaTerminal.PtyHarness`, which runs out of
+  process. A process that owns a console cannot bind a child to a pseudo console, and the xUnit test
+  host is a console executable, so that scenario cannot be tested in process. See
+  [docs/troubleshooting.md](docs/troubleshooting.md).
+
+Tests run on Microsoft.Testing.Platform rather than the VSTest bridge. That is deliberate: the
+bridge was observed reporting a run as fully passing while five tests failed and were dropped from
+the report.
 
 Test methods are named `Member_Scenario_Expectation` so that a CI failure reads as a sentence.
 

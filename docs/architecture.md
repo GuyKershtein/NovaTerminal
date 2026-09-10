@@ -207,3 +207,55 @@ debug log being free and being a performance problem.
 The .NET 10 SDK now defaults to the XML `.slnx` solution format. NovaTerminal uses the classic
 `.sln` because it is understood by every version of every tool someone might clone this repository
 with. The gain from `.slnx` is cosmetic; the compatibility cost is not.
+
+### D7: One thread owns the engine
+
+Terminal state is mutated only on the UI thread. The background pump reads bytes from the
+pseudo-terminal and hands them over; it never touches the engine.
+
+The alternative - locking the engine - would have meant the renderer could observe a half-applied
+escape sequence, a resize could interleave with one, and the hot path would pay for a lock on every
+character. Single ownership removes the whole class of problem instead of managing it. Backpressure
+falls out of the same design: the pump awaits the UI thread, so while a repaint is in progress
+nothing is drained and the bounded channel fills, which the reader feels as a slower pipe.
+
+### D8: The ConPTY tests run out of process
+
+A process that owns a console cannot bind a child to a pseudo console: the child attaches to the
+inherited console instead, and `FreeConsole` does not undo it. xUnit v3 requires a console test
+host, so the ConPTY path cannot be exercised from inside the test process at all.
+
+`tests/NovaTerminal.PtyHarness` is a GUI-subsystem executable that runs the real scenario against
+the real backend and reports through a file, which the integration tests assert on. The alternative
+was to test a mock, which would have verified nothing: no test double can tell you whether
+`UpdateProcThreadAttribute` was called with the right argument shape - and it was not, for a while.
+
+### D9: Tests run on Microsoft.Testing.Platform, not the VSTest bridge
+
+Running xUnit v3 through the VSTest adapter reported `Passed! - Failed: 0, Passed: 94` while five
+tests were failing; they were dropped from the report rather than counted. A harness that
+under-reports failures is worse than no harness, because it converts a broken build into a green
+one. The native runner reports them.
+
+### D10: Rendering the view, not the buffer
+
+The renderer asks the engine for "row *n* of the current view" rather than for a buffer row. When
+the user has scrolled back, the top rows come from history and the rest from the live screen, and
+the renderer never learns which is which.
+
+That keeps scrollback out of the rendering path entirely: no offset arithmetic in the drawing code,
+no special cases, and one place - `TerminalState.GetViewRow` - where the two sources are joined.
+
+### D11: A benchmark reversed an optimisation
+
+Batching printable ASCII runs in the parser looked like an obvious improvement and was implemented
+before being measured. It made no difference: 748 microseconds before, 756 after, well inside the
+error bars.
+
+A second benchmark printing the same text with no parser at all cost 647 microseconds, which said
+the parser accounted for about 13% of the time and the optimisation had been aimed at the wrong
+layer. It was reverted rather than kept "because it should help". Removing redundant bounds checks
+from the engine's write path - the actual 87% - produced 3 to 12% depending on the workload.
+
+The general rule this illustrates: an optimisation that cannot be demonstrated is complexity with a
+story attached.

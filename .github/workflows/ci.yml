@@ -18,7 +18,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       # Do not cancel the other platform when one fails: a platform-specific failure is exactly
-      # the kind of thing this matrix exists to reveal.
+      # what this matrix exists to reveal.
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
@@ -31,6 +31,13 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
 
       - name: Restore
         run: dotnet restore
@@ -69,3 +76,22 @@ jobs:
 
       - name: Verify formatting
         run: dotnet format --verify-no-changes --no-restore
+
+  benchmarks:
+    name: Benchmarks compile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The benchmarks are built but not run. Timings from a shared CI runner are too noisy to be
+      # worth anything, and publishing numbers nobody can trust is worse than publishing none.
+      # Compiling them keeps them from rotting as the code they measure changes.
+      - name: Build benchmarks
+        run: dotnet build benchmarks/NovaTerminal.Benchmarks --configuration Release -warnaserror

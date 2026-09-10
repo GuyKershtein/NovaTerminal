@@ -57,6 +57,7 @@ public sealed class AnsiParser
     private const int ReplacementCharacter = 0xFFFD;
     private const int MaxIntermediates = 1;
 
+
     private readonly ITerminalOutputHandler _handler;
     private readonly ILogger _logger;
 
