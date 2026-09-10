@@ -1,0 +1,77 @@
+name: Bug report
+description: Something in NovaTerminal behaves incorrectly
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a report. Terminal bugs are far easier to fix when the exact byte
+        sequence is known, so please include one if you can.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did the terminal do, and what did you expect it to do instead?
+      placeholder: After running `git log`, the cursor stayed on the last line instead of returning to the prompt.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: The shell, the command, and anything needed to see the problem.
+      placeholder: |
+        1. Open NovaTerminal with PowerShell
+        2. Run `...`
+        3. Observe `...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: sequence
+    attributes:
+      label: Escape sequences involved
+      description: >
+        If you can capture the raw output that triggers this, paste it here. On Unix,
+        `command | od -c` works well; on Windows, `Format-Hex` does.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: NovaTerminal version
+      description: Shown in the window title, or the commit you built from.
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: Windows 11 24H2 / Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      placeholder: PowerShell 7.4 / cmd.exe / bash 5.2
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: >
+        Relevant lines from the log directory named in the README. Please remove anything private
+        before pasting; logs can contain terminal output.
+      render: text
+    validations:
+      required: false

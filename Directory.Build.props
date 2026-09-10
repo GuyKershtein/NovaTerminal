@@ -1,0 +1,33 @@
+<Project>
+
+  <!--
+    Settings shared by every project in the repository.
+    Per-area overrides live in src/Directory.Build.props and tests/Directory.Build.props.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!-- Treat sloppiness as a build break. Nullability violations are bugs, not suggestions. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+
+    <!-- CS1591 = missing XML doc. Kept as a warning so a missing doc comment does not block a build. -->
+    <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
+
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <Product>NovaTerminal</Product>
+    <Authors>NovaTerminal contributors</Authors>
+    <Company>NovaTerminal</Company>
+    <VersionPrefix>0.1.0</VersionPrefix>
+    <RepositoryType>git</RepositoryType>
+    <NeutralLanguage>en-US</NeutralLanguage>
+  </PropertyGroup>
+
+</Project>

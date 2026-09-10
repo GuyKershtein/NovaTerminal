@@ -1,0 +1,45 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="NovaTerminal.App.Views.MainWindow"
+        Title="NovaTerminal"
+        Width="920" Height="560"
+        MinWidth="480" MinHeight="320">
+
+  <!--
+    Milestone 1 shell. This window is a scaffold that proves the application starts, resolves its
+    services and renders; the terminal view replaces its content in Milestone 4.
+  -->
+  <DockPanel Margin="28">
+
+    <StackPanel DockPanel.Dock="Top" Spacing="6">
+      <TextBlock Text="NovaTerminal" FontSize="30" FontWeight="SemiBold" />
+      <TextBlock x:Name="SubtitleText"
+                 Opacity="0.7"
+                 Text="A terminal emulator written from scratch in C#." />
+    </StackPanel>
+
+    <StackPanel DockPanel.Dock="Bottom" Spacing="4" Margin="0,20,0,0">
+      <TextBlock x:Name="PlatformText" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" Opacity="0.6" />
+      <TextBlock x:Name="LogPathText" FontFamily="Cascadia Mono,Consolas,monospace" FontSize="12" Opacity="0.6" />
+    </StackPanel>
+
+    <Border Margin="0,24,0,0"
+            Padding="20"
+            CornerRadius="8"
+            BorderThickness="1"
+            BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+      <StackPanel Spacing="12">
+        <TextBlock Text="Build status" FontWeight="SemiBold" />
+        <TextBlock TextWrapping="Wrap"
+                   Opacity="0.75"
+                   Text="The solution, layering and test harness are in place. The terminal engine, VT parser and shell backend land in the milestones that follow." />
+        <TextBlock x:Name="ConfigurationText"
+                   FontFamily="Cascadia Mono,Consolas,monospace"
+                   FontSize="12"
+                   Opacity="0.7"
+                   TextWrapping="Wrap" />
+      </StackPanel>
+    </Border>
+
+  </DockPanel>
+</Window>

@@ -1,0 +1,46 @@
+name: Feature request
+description: Suggest a capability for NovaTerminal
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation you run into, rather than the solution you have in mind.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: What should NovaTerminal do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: prior-art
+    attributes:
+      label: Prior art
+      description: >
+        Do other terminals do this (Windows Terminal, iTerm2, kitty, alacritty, xterm)? If it
+        involves an escape sequence, which one, and where is it specified?
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area does this touch?
+      options:
+        - Terminal engine (buffer, cursor, state)
+        - ANSI/VT parser
+        - Shell process / pseudo-terminal
+        - Input and key handling
+        - Rendering
+        - Tabs and sessions
+        - Themes and configuration
+        - Not sure
+    validations:
+      required: true

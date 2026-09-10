@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/NovaTerminal.Core/NovaTerminal.Core.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Terminal/NovaTerminal.Terminal.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Process/NovaTerminal.Process.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Platform/NovaTerminal.Platform.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Input/NovaTerminal.Input.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Rendering/NovaTerminal.Rendering.csproj" />
+  </ItemGroup>
+</Project>

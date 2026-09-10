@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <Description>Avalonia desktop application. Composition root and GUI adapter; contains no terminal logic of its own.</Description>
+    <ApplicationIcon></ApplicationIcon>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <RootNamespace>NovaTerminal.App</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Desktop" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.Extensions.Logging" />
+    <PackageReference Include="Serilog.Sinks.Console" />
+    <PackageReference Include="Serilog.Sinks.File" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
+    <ProjectReference Include="../NovaTerminal.Terminal/NovaTerminal.Terminal.csproj" />
+    <ProjectReference Include="../NovaTerminal.Process/NovaTerminal.Process.csproj" />
+    <ProjectReference Include="../NovaTerminal.Platform/NovaTerminal.Platform.csproj" />
+    <ProjectReference Include="../NovaTerminal.Input/NovaTerminal.Input.csproj" />
+    <ProjectReference Include="../NovaTerminal.Rendering/NovaTerminal.Rendering.csproj" />
+  </ItemGroup>
+
+</Project>

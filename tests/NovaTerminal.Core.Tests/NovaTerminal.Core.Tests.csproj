@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/NovaTerminal.Core/NovaTerminal.Core.csproj" />
+  </ItemGroup>
+</Project>

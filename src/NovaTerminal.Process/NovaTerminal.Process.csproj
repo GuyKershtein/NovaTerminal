@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Platform-neutral shell session abstractions (IShellSession, IShellBackend) and session lifetime management.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

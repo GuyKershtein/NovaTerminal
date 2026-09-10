@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>The terminal engine: screen buffer, cursor, terminal state and the ANSI/VT escape sequence parser. Contains no GUI dependency by design.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

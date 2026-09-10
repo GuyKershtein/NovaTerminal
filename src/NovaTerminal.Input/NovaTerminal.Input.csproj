@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Translation of platform-neutral key events into the VT byte sequences a shell expects. Pure functions over immutable input; no GUI dependency.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
+  </ItemGroup>
+
+</Project>

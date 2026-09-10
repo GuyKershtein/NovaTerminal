@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>Platform-specific shell backends. Windows ConPTY interop lives here; this is the only project permitted to contain native interop.</Description>
+    <!-- Native interop and SafeHandle work is confined to this assembly. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
+    <ProjectReference Include="../NovaTerminal.Process/NovaTerminal.Process.csproj" />
+  </ItemGroup>
+
+</Project>

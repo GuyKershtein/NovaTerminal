@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <Description>GUI-agnostic rendering pipeline: converts terminal snapshots into coalesced styled runs and damage sets for a toolkit-specific view to draw.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
+    <ProjectReference Include="../NovaTerminal.Terminal/NovaTerminal.Terminal.csproj" />
+  </ItemGroup>
+
+</Project>
