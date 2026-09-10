@@ -7,6 +7,24 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestone 2: the virtual terminal
+
+- `TerminalCell`: character, colours, attributes and grid role packed into sixteen bytes; a zeroed
+  cell is a valid blank cell, so buffers need no initialisation pass.
+- `TerminalLine` and `TerminalBuffer`: the screen grid, with scrolling implemented as a rotation of
+  line references and recycling of the vacated line, so scrolling allocates nothing.
+- Per-row damage tracking, so the renderer can repaint only what changed.
+- `TerminalCursor` with the deferred-wrap ("last column") rule, visibility, shape, and DECSC/DECRC
+  save and restore including the pen.
+- `TerminalState`: printing, `CR`/`LF`/`RI`/`BS`/`HT`/`CBT`, cursor movement bounded by the
+  margins, `EL`/`ED`/`ECH`, `ICH`/`DCH`, `IL`/`DL`, `SU`/`SD`, `DECSTBM`, resize and `RIS`.
+- `CharacterWidth`: zero-, single- and double-width classification, with wide characters resolved
+  from a sorted range table and combining marks from their Unicode category.
+- `TabStops`, honouring `HTS` and `TBC` rather than assuming a fixed interval.
+- `CellStyle` in Core, doubling as the stored cell styling and the terminal's current pen.
+- 137 further tests covering wrapping, scrolling regions, wide-character corruption, erase
+  semantics and resize behaviour.
+
 ### Added — Milestone 1: project foundation
 
 - Seven-project solution enforcing a layered architecture: `Core`, `Terminal`, `Process`,

@@ -19,8 +19,8 @@ repository — nothing is listed as working until it is implemented and tested.
 | # | Milestone | Status |
 |---|-----------|--------|
 | 1 | Project foundation: solution, layering, CI, tests | ✅ Done |
-| 2 | Virtual terminal: cells, buffer, cursor | ⏳ Next |
-| 3 | ANSI/VT parser state machine | ⬜ Planned |
+| 2 | Virtual terminal: cells, buffer, cursor, scrolling | ✅ Done |
+| 3 | ANSI/VT parser state machine | ⏳ Next |
 | 4 | Terminal view and GUI | ⬜ Planned |
 | 5 | Shell process launch | ⬜ Planned |
 | 6 | Shell ↔ terminal wiring | ⬜ Planned |
@@ -138,8 +138,21 @@ The engine models a VT-series terminal:
 - A **cursor**: position, visibility, shape, and saved state.
 - A **scrolling region** (top and bottom margins) that constrains scrolling.
 - An **alternate screen buffer**, so full-screen programs like `vim` can take over the display and
-  restore it on exit.
-- A bounded **scrollback** ring of lines that have scrolled off the top.
+  restore it on exit *(Milestone 12)*.
+- A bounded **scrollback** ring of lines that have scrolled off the top *(Milestone 11)*.
+
+Three rules in the engine are worth calling out, because they are what separate a terminal emulator
+from a text box:
+
+- **Deferred wrap.** Printing into the final column does not move the cursor. It stays put with a
+  "pending wrap" flag, and only the *next* printable character wraps. Without this, output formatted
+  to exactly the terminal width gains a blank line between every row.
+- **Characters are not all one column wide.** `中` occupies two cells — a leading cell plus a
+  placeholder — and a combining accent occupies none. Overwriting either half of a wide pair erases
+  both, so a half-glyph can never desynchronise the rest of the line.
+- **Erase uses the current background, not black.** `ESC[K` fills with the background colour
+  currently selected by SGR but drops the other attributes, so clearing inside a coloured region
+  keeps the colour without smearing underlines across blank space.
 
 Cell density drives the memory profile, so colours are packed into a single `uint` (kind tag plus
 payload) and attributes into a `ushort`. A 100×50 screen with 10,000 lines of scrollback holds over
