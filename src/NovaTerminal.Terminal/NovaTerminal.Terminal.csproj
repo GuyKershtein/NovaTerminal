@@ -5,6 +5,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The engine logs unsupported and malformed sequences; it takes no other dependency. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../NovaTerminal.Core/NovaTerminal.Core.csproj" />
   </ItemGroup>
 

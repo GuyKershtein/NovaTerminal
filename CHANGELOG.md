@@ -7,6 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestone 3: the ANSI/VT parser
+
+- `AnsiParser`: an escape-sequence state machine following Paul Williams' VT500 model, whose state
+  persists between calls so a sequence split across reads parses identically to one that arrives
+  whole.
+- Resumable UTF-8 decoding, rejecting overlong encodings and surrogate halves; a character split
+  across a read boundary is held rather than rejected.
+- `TerminalInterpreter`: cursor movement, erasing, insert/delete, scrolling regions, tab stops,
+  save/restore, reset, private modes, and replies to Device Status Report and Device Attributes.
+- `SgrInterpreter`: colours and attributes, including 256-colour and 24-bit forms in both the
+  semicolon and colon spellings.
+- Bounded parameters, parameter counts and string payloads; unknown sequences are ignored and each
+  distinct one is logged at most once.
+- 69 further tests, including a case that splits a sequence at every possible byte boundary.
+
 ### Added — Milestone 2: the virtual terminal
 
 - `TerminalCell`: character, colours, attributes and grid role packed into sixteen bytes; a zeroed

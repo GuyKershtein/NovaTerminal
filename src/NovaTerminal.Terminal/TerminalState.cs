@@ -71,6 +71,24 @@ public sealed class TerminalState
     public bool AutoWrap { get; set; } = true;
 
     /// <summary>
+    /// Whether the arrow and Home/End keys send their application-mode form, as controlled by
+    /// <c>DECCKM</c>.
+    /// </summary>
+    /// <remarks>
+    /// This mode changes what the <em>keyboard</em> sends, not what the screen does: with it set,
+    /// Up sends <c>ESC O A</c> instead of <c>ESC [ A</c>. Full-screen programs enable it so they can
+    /// tell an arrow key apart from a user typing the same characters. The engine only records it;
+    /// the input layer reads it when encoding a key press.
+    /// </remarks>
+    public bool ApplicationCursorKeys { get; set; }
+
+    /// <summary>
+    /// Whether the numeric keypad sends its application-mode form, as controlled by <c>DECKPAM</c>
+    /// and <c>DECKPNM</c>. Recorded here for the same reason as <see cref="ApplicationCursorKeys"/>.
+    /// </summary>
+    public bool ApplicationKeypad { get; set; }
+
+    /// <summary>
     /// The style erased cells take: the current background, without the other attributes.
     /// </summary>
     private CellStyle EraseStyle => CurrentStyle.ForErase();
@@ -439,6 +457,8 @@ public sealed class TerminalState
     {
         CurrentStyle = CellStyle.Default;
         AutoWrap = true;
+        ApplicationCursorKeys = false;
+        ApplicationKeypad = false;
         _savedCursor = null;
 
         Buffer.Clear(CellStyle.Default);

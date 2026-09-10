@@ -20,8 +20,8 @@ repository — nothing is listed as working until it is implemented and tested.
 |---|-----------|--------|
 | 1 | Project foundation: solution, layering, CI, tests | ✅ Done |
 | 2 | Virtual terminal: cells, buffer, cursor, scrolling | ✅ Done |
-| 3 | ANSI/VT parser state machine | ⏳ Next |
-| 4 | Terminal view and GUI | ⬜ Planned |
+| 3 | ANSI/VT parser state machine | ✅ Done |
+| 4 | Terminal view and GUI | ⏳ Next |
 | 5 | Shell process launch | ⬜ Planned |
 | 6 | Shell ↔ terminal wiring | ⬜ Planned |
 | 7 | Colours, cursor movement, clearing, scrolling | ⬜ Planned |
