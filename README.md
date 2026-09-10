@@ -4,8 +4,7 @@ A terminal emulator written from scratch in C# — virtual screen buffer, VT/ANS
 parser, pseudo-terminal process management and custom-drawn rendering, with no terminal-emulation
 libraries underneath it.
 
-<!-- Replace OWNER with your GitHub account to activate the badge. -->
-[![CI](https://github.com/OWNER/NovaTerminal/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/NovaTerminal/actions/workflows/ci.yml)
+[![CI](https://github.com/GuyKershtein/NovaTerminal/actions/workflows/ci.yml/badge.svg)](https://github.com/GuyKershtein/NovaTerminal/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
@@ -269,7 +268,7 @@ thrown. The terminal is the tool you would need in order to fix it.
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
-git clone https://github.com/OWNER/NovaTerminal.git
+git clone https://github.com/GuyKershtein/NovaTerminal.git
 cd NovaTerminal
 dotnet build
 ```

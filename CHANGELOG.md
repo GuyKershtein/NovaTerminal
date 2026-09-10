@@ -172,4 +172,4 @@ interactive shell on Windows, so there was no intermediate step worth building.
 - GitHub Actions CI: build and test on Windows and Linux, warnings as errors, formatting
   verification.
 
-[Unreleased]: https://github.com/OWNER/NovaTerminal/commits/main
+[Unreleased]: https://github.com/GuyKershtein/NovaTerminal/commits/main
