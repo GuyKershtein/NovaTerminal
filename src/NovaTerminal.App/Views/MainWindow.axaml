@@ -2,23 +2,83 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="NovaTerminal.App.Views.MainWindow"
         Title="NovaTerminal"
-        Width="960" Height="600"
-        MinWidth="320" MinHeight="200"
+        Width="980" Height="620"
+        MinWidth="360" MinHeight="220"
         Background="#11131A">
 
   <DockPanel>
-    <Border x:Name="StatusBar"
-            DockPanel.Dock="Bottom"
-            Padding="10,4"
-            Background="#181B24">
+
+    <!-- Tab strip. Hidden while there is only one tab: a single-session terminal should look like
+         a terminal, not like a tabbed application with one tab. -->
+    <Border x:Name="TabStrip"
+            DockPanel.Dock="Top"
+            Background="#181B24"
+            IsVisible="False">
+      <DockPanel>
+        <Button x:Name="NewTabButton"
+                DockPanel.Dock="Right"
+                Content="+"
+                Width="30"
+                Background="Transparent"
+                Foreground="#8A91A5"
+                BorderThickness="0"
+                ToolTip.Tip="New tab (Ctrl+Shift+T)" />
+        <ItemsControl x:Name="TabItems">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+        </ItemsControl>
+      </DockPanel>
+    </Border>
+
+    <!-- Search bar, shown by Ctrl+Shift+F. -->
+    <Border x:Name="SearchBar"
+            DockPanel.Dock="Top"
+            Background="#1E2230"
+            Padding="8,5"
+            IsVisible="False">
+      <DockPanel>
+        <TextBlock DockPanel.Dock="Left"
+                   Text="Find"
+                   VerticalAlignment="Center"
+                   Margin="0,0,8,0"
+                   Foreground="#8A91A5"
+                   FontSize="12" />
+        <TextBlock x:Name="SearchStatus"
+                   DockPanel.Dock="Right"
+                   VerticalAlignment="Center"
+                   Margin="8,0,0,0"
+                   MinWidth="90"
+                   Foreground="#8A91A5"
+                   FontSize="12" />
+        <Button x:Name="SearchNextButton"
+                DockPanel.Dock="Right"
+                Content="Next"
+                Margin="4,0,0,0"
+                FontSize="12" />
+        <Button x:Name="SearchPreviousButton"
+                DockPanel.Dock="Right"
+                Content="Previous"
+                Margin="4,0,0,0"
+                FontSize="12" />
+        <TextBox x:Name="SearchBox"
+                 FontFamily="Cascadia Mono,Consolas,monospace"
+                 FontSize="12"
+                 PlaceholderText="Search the scrollback" />
+      </DockPanel>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Padding="10,4" Background="#181B24">
       <TextBlock x:Name="StatusText"
                  FontFamily="Cascadia Mono,Consolas,monospace"
                  FontSize="11"
                  Foreground="#8A91A5" />
     </Border>
 
-    <!-- The terminal surface is added here in code: it is a custom-drawn control that needs its
-         engine and theme injected, which XAML cannot supply. -->
+    <!-- The terminal surface is added in code: it is a custom-drawn control that needs its engine
+         and theme injected, which XAML cannot supply. -->
     <Border x:Name="TerminalHost" Padding="6" />
   </DockPanel>
 </Window>

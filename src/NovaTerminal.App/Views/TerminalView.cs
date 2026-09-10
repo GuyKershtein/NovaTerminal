@@ -1,7 +1,7 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
-using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using NovaTerminal.Core;
@@ -9,22 +9,22 @@ using NovaTerminal.Core.Configuration;
 using NovaTerminal.Input;
 using NovaTerminal.Rendering;
 using NovaTerminal.Terminal;
+using TerminalSelectionMode = NovaTerminal.Rendering.SelectionMode;
 
 namespace NovaTerminal.App.Views;
 
 /// <summary>
-/// Draws a <see cref="TerminalState"/>.
+/// Draws a <see cref="TerminalState"/> and turns pointer and keyboard activity into terminal input.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This control is an adapter and nothing more. It reads terminal state and paints it; it never
-/// changes it. Everything about how a terminal behaves lives in the engine, which is why the engine
-/// can be tested exhaustively without ever creating a window.
+/// This control is an adapter. It reads terminal state and paints it, and it reports what the user
+/// did; it never decides what any of it means. Everything about how a terminal behaves lives in the
+/// engine, which is why the engine can be tested exhaustively without ever creating a window.
 /// </para>
 /// <para>
-/// Drawing is one custom-drawn surface rather than a tree of text elements. A 200×50 screen is
-/// 10,000 cells; a control per cell, or even per row, would spend all its time in layout. Instead
-/// the whole grid is painted in one pass over coalesced runs.
+/// Drawing is one custom-drawn surface rather than a tree of text elements. A 200x50 screen is
+/// 10,000 cells; a control per cell, or even per row, would spend all its time in layout.
 /// </para>
 /// </remarks>
 public sealed class TerminalView : Control
@@ -35,6 +35,7 @@ public sealed class TerminalView : Control
     private const double BarCursorWidthFactor = 0.15;
     private const double UnderlineCursorHeightFactor = 0.12;
     private const double CursorBlinkIntervalSeconds = 0.53;
+    private const int WheelLinesPerNotch = 3;
 
     private readonly RowRunBuilder _runBuilder = new();
     private readonly Dictionary<RgbColor, IBrush> _brushCache = [];
@@ -45,6 +46,8 @@ public sealed class TerminalView : Control
     private AppearanceOptions _appearance;
     private Typeface _typeface;
     private CellMetrics _metrics;
+    private TerminalSelection? _selection;
+    private bool _isSelecting;
     private bool _cursorOn = true;
 
     /// <summary>Creates a view over a terminal.</summary>
@@ -57,41 +60,27 @@ public sealed class TerminalView : Control
         _metrics = MeasureCell(_typeface, appearance);
 
         Focusable = true;
+        Cursor = new Cursor(StandardCursorType.Ibeam);
 
-        _blinkTimer = new DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(CursorBlinkIntervalSeconds),
-        };
+        _blinkTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(CursorBlinkIntervalSeconds) };
         _blinkTimer.Tick += OnBlinkTick;
     }
 
-    /// <summary>
-    /// Raised when the user produced input that should reach the shell.
-    /// </summary>
-    /// <remarks>
-    /// The view does not write to the shell itself. It reports what happened and lets the session
-    /// decide, which keeps the control usable in a window that has no shell attached at all.
-    /// </remarks>
-    public event EventHandler<ReadOnlyMemory<byte>>? InputProduced;
-
     /// <summary>Raised when the viewport's size in cells changes.</summary>
     /// <remarks>
-    /// The view reports the new size rather than acting on it. Resizing the terminal means resizing
-    /// the pseudo-terminal too, and the order of those operations matters; the session owns that
-    /// decision.
+    /// The view reports the new size rather than acting on it: resizing the terminal means resizing
+    /// the pseudo-terminal too, and the session owns the ordering that makes that safe.
     /// </remarks>
     public event EventHandler<TerminalSize>? ViewportSizeChanged;
 
+    /// <summary>Raised when the user produced input that should reach the shell.</summary>
+    public event EventHandler<ReadOnlyMemory<byte>>? InputProduced;
+
+    /// <summary>Raised when the selection changed, so the window can enable or disable Copy.</summary>
+    public event EventHandler? SelectionChanged;
+
     /// <summary>The geometry of one cell, in device-independent pixels.</summary>
     public CellMetrics CellMetrics => _metrics;
-
-    /// <summary>
-    /// The engine modes that change how a key press is encoded, read at the moment of the press.
-    /// </summary>
-    public TerminalInputModes InputModes => new(
-        _terminal.ApplicationCursorKeys,
-        _terminal.ApplicationKeypad,
-        BracketedPaste: false);
 
     /// <summary>The terminal being displayed.</summary>
     public TerminalState Terminal
@@ -100,6 +89,7 @@ public sealed class TerminalView : Control
         set
         {
             _terminal = value;
+            ClearSelection();
             InvalidateVisual();
         }
     }
@@ -116,6 +106,18 @@ public sealed class TerminalView : Control
         }
     }
 
+    /// <summary>The currently selected text, or an empty string when nothing is selected.</summary>
+    public string SelectedText => _selection?.GetText(_terminal) ?? string.Empty;
+
+    /// <summary>Whether anything is selected.</summary>
+    public bool HasSelection => _selection is { IsEmpty: false };
+
+    /// <summary>The engine modes that change how a key press is encoded.</summary>
+    public TerminalInputModes InputModes => new(
+        _terminal.ApplicationCursorKeys,
+        _terminal.ApplicationKeypad,
+        _terminal.BracketedPaste);
+
     /// <summary>Applies new font and cursor settings, remeasuring the cell.</summary>
     public void UpdateAppearance(AppearanceOptions appearance)
     {
@@ -127,12 +129,7 @@ public sealed class TerminalView : Control
         InvalidateVisual();
     }
 
-    /// <summary>Repaints the parts of the screen the engine has marked as changed.</summary>
-    /// <remarks>
-    /// Avalonia composites whole controls, so this currently invalidates the entire view. The
-    /// engine's per-row damage set is still what decides <em>whether</em> to draw at all, which is
-    /// the difference that matters when a command produces thousands of lines a second.
-    /// </remarks>
+    /// <summary>Repaints when the engine reports that something changed.</summary>
     public void InvalidateDamagedRows()
     {
         if (!_terminal.Buffer.HasDamage)
@@ -145,14 +142,46 @@ public sealed class TerminalView : Control
         InvalidateVisual();
     }
 
+    /// <summary>Selects the entire visible screen.</summary>
+    public void SelectAll()
+    {
+        var size = _terminal.Size;
+        SetSelection(new TerminalSelection(
+            new CellPosition(0, 0),
+            new CellPosition(size.Columns, size.Rows - 1)));
+    }
+
+    /// <summary>Clears the selection.</summary>
+    public void ClearSelection()
+    {
+        if (_selection is null)
+        {
+            return;
+        }
+
+        _selection = null;
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
+        InvalidateVisual();
+    }
+
+    /// <summary>Scrolls the view through history and repaints.</summary>
+    public void ScrollBy(int lines)
+    {
+        var moved = lines > 0 ? _terminal.ScrollViewBack(lines) : _terminal.ScrollViewForward(-lines);
+
+        if (moved)
+        {
+            InvalidateVisual();
+        }
+    }
+
     /// <inheritdoc />
     public override void Render(DrawingContext context)
     {
         var bounds = new Rect(Bounds.Size);
         context.FillRectangle(GetBrush(_theme.Background), bounds);
 
-        var size = _terminal.Size;
-        var rows = Math.Min(size.Rows, (int)Math.Ceiling(bounds.Height / _metrics.Height));
+        var rows = Math.Min(_terminal.Size.Rows, (int)Math.Ceiling(bounds.Height / _metrics.Height));
 
         for (var row = 0; row < rows; row++)
         {
@@ -160,73 +189,6 @@ public sealed class TerminalView : Control
         }
 
         RenderCursor(context);
-    }
-
-    /// <inheritdoc />
-    protected override void OnKeyDown(KeyEventArgs e)
-    {
-        base.OnKeyDown(e);
-
-        var modifiers = KeyMapping.ToTerminalModifiers(e.KeyModifiers);
-        var key = KeyMapping.ToTerminalKey(e.Key);
-
-        if (key == TerminalKey.None)
-        {
-            // Ctrl+C, Alt+F and the like never produce a text input event, so they are encoded from
-            // the key itself. Without this, a terminal could not be interrupted.
-            if (TryEncodeCharacterCombination(e.Key, modifiers, out var combination))
-            {
-                InputProduced?.Invoke(this, combination);
-                e.Handled = true;
-            }
-
-            return;
-        }
-
-        var encoded = KeyEncoder.Encode(key, modifiers, InputModes);
-
-        if (encoded is null)
-        {
-            return;
-        }
-
-        InputProduced?.Invoke(this, encoded);
-
-        // Marking the event handled stops the key also being delivered as text, and stops Avalonia
-        // treating Tab as a request to move focus out of the terminal.
-        e.Handled = true;
-    }
-
-    /// <inheritdoc />
-    protected override void OnTextInput(TextInputEventArgs e)
-    {
-        base.OnTextInput(e);
-
-        if (string.IsNullOrEmpty(e.Text))
-        {
-            return;
-        }
-
-        // Text input already reflects the keyboard layout and any dead keys, which is why typed
-        // characters are taken from here rather than reconstructed from key codes.
-        // Text input carries no modifiers: a control or alt combination never reaches it at all,
-        // which is why those are handled in OnKeyDown instead.
-        var encoded = KeyEncoder.EncodeText(e.Text);
-
-        if (encoded is null)
-        {
-            return;
-        }
-
-        InputProduced?.Invoke(this, encoded);
-        e.Handled = true;
-    }
-
-    /// <inheritdoc />
-    protected override void OnPointerPressed(PointerPressedEventArgs e)
-    {
-        base.OnPointerPressed(e);
-        Focus();
     }
 
     /// <inheritdoc />
@@ -257,14 +219,224 @@ public sealed class TerminalView : Control
         base.OnDetachedFromVisualTree(e);
     }
 
+    /// <inheritdoc />
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        var modifiers = KeyMapping.ToTerminalModifiers(e.KeyModifiers);
+        var key = KeyMapping.ToTerminalKey(e.Key);
+
+        if (key == TerminalKey.None)
+        {
+            // Ctrl+C, Alt+F and the like never produce a text input event, so they are encoded from
+            // the key itself. Without this, a terminal could not be interrupted.
+            if (TryEncodeCharacterCombination(e.Key, modifiers, out var combination))
+            {
+                Send(combination);
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        var encoded = KeyEncoder.Encode(key, modifiers, InputModes);
+
+        if (encoded is null)
+        {
+            return;
+        }
+
+        Send(encoded);
+
+        // Marking the event handled stops the key also arriving as text, and stops Avalonia
+        // treating Tab as a request to move focus out of the terminal.
+        e.Handled = true;
+    }
+
+    /// <inheritdoc />
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        base.OnTextInput(e);
+
+        if (string.IsNullOrEmpty(e.Text))
+        {
+            return;
+        }
+
+        // Text input already reflects the keyboard layout and any dead keys, which is why typed
+        // characters are taken from here rather than reconstructed from key codes. It carries no
+        // modifiers: control and alt combinations are handled in OnKeyDown.
+        var encoded = KeyEncoder.EncodeText(e.Text);
+
+        if (encoded is null)
+        {
+            return;
+        }
+
+        Send(encoded);
+        e.Handled = true;
+    }
+
+    /// <inheritdoc />
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        Focus();
+
+        var point = e.GetCurrentPoint(this);
+
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            return;
+        }
+
+        var position = HitTest(point.Position);
+
+        if (e.ClickCount == 2)
+        {
+            SelectWordAt(position);
+            return;
+        }
+
+        if (e.ClickCount >= 3)
+        {
+            SelectLineAt(position);
+            return;
+        }
+
+        // Alt turns a drag into a rectangular selection, which is what you want for one column of
+        // tabular output.
+        var mode = e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Alt)
+            ? TerminalSelectionMode.Block
+            : TerminalSelectionMode.Linear;
+
+        _isSelecting = true;
+        SetSelection(new TerminalSelection(position, position, mode));
+        e.Pointer.Capture(this);
+    }
+
+    /// <inheritdoc />
+    protected override void OnPointerMoved(PointerEventArgs e)
+    {
+        base.OnPointerMoved(e);
+
+        if (!_isSelecting || _selection is not { } selection)
+        {
+            return;
+        }
+
+        SetSelection(selection with { Focus = HitTest(e.GetPosition(this)) });
+    }
+
+    /// <inheritdoc />
+    protected override void OnPointerReleased(PointerReleasedEventArgs e)
+    {
+        base.OnPointerReleased(e);
+
+        if (!_isSelecting)
+        {
+            return;
+        }
+
+        _isSelecting = false;
+        e.Pointer.Capture(null);
+    }
+
+    /// <inheritdoc />
+    protected override void OnPointerWheelChanged(PointerWheelEventArgs e)
+    {
+        base.OnPointerWheelChanged(e);
+
+        if (e.Delta.Y == 0)
+        {
+            return;
+        }
+
+        ScrollBy((int)Math.Round(e.Delta.Y) * WheelLinesPerNotch);
+        e.Handled = true;
+    }
+
+    private void Send(ReadOnlyMemory<byte> data)
+    {
+        // Typing while reading history takes the user back to the prompt, where their keystrokes
+        // are actually going.
+        if (_terminal.ScrollViewToBottom())
+        {
+            InvalidateVisual();
+        }
+
+        InputProduced?.Invoke(this, data);
+    }
+
+    private CellPosition HitTest(Point point)
+    {
+        var (column, row) = _metrics.HitTest(point.X, point.Y, _terminal.Size);
+        return new CellPosition(column, row);
+    }
+
+    private void SetSelection(TerminalSelection selection)
+    {
+        _selection = selection;
+        SelectionChanged?.Invoke(this, EventArgs.Empty);
+        InvalidateVisual();
+    }
+
+    /// <summary>Selects the word under a position, as a double-click does.</summary>
+    private void SelectWordAt(CellPosition position)
+    {
+        var cells = _terminal.GetViewRow(position.Row);
+
+        if (cells.Length == 0)
+        {
+            return;
+        }
+
+        var column = Math.Clamp(position.Column, 0, cells.Length - 1);
+
+        if (IsWordSeparator(cells[column]))
+        {
+            SetSelection(new TerminalSelection(position, position with { Column = position.Column + 1 }));
+            return;
+        }
+
+        var start = column;
+        while (start > 0 && !IsWordSeparator(cells[start - 1]))
+        {
+            start--;
+        }
+
+        var end = column;
+        while (end + 1 < cells.Length && !IsWordSeparator(cells[end + 1]))
+        {
+            end++;
+        }
+
+        SetSelection(new TerminalSelection(
+            new CellPosition(start, position.Row),
+            new CellPosition(end + 1, position.Row)));
+    }
+
+    private void SelectLineAt(CellPosition position)
+        => SetSelection(new TerminalSelection(
+            new CellPosition(0, position.Row),
+            new CellPosition(_terminal.Size.Columns, position.Row)));
+
     /// <summary>
-    /// Encodes a modifier combination applied to an ordinary character key.
+    /// Whether a cell breaks a word. Paths and URLs are what people most often double-click in a
+    /// terminal, so the separator set is deliberately narrow: dots, slashes and dashes are kept.
     /// </summary>
-    /// <remarks>
-    /// Only control and alt combinations are handled here. Plain characters, and anything involving
-    /// a keyboard layout or a dead key, come through text input instead, where the operating system
-    /// has already worked out which character was meant.
-    /// </remarks>
+    private static bool IsWordSeparator(TerminalCell cell)
+    {
+        if (cell.IsEmpty)
+        {
+            return true;
+        }
+
+        var value = cell.Character.Value;
+        return value is ' ' or '\t' or '"' or '\'' or '`' or '(' or ')' or '[' or ']' or '{' or '}' or '<' or '>';
+    }
+
     private static bool TryEncodeCharacterCombination(
         Key key, NovaTerminal.Input.KeyModifiers modifiers, out byte[] encoded)
     {
@@ -309,7 +481,9 @@ public sealed class TerminalView : Control
 
     private void RenderRow(DrawingContext context, int row)
     {
-        var cells = _terminal.Buffer.GetRow(row);
+        // Rows come from the current view, which may be showing history rather than the live
+        // screen. The renderer never needs to know which.
+        var cells = _terminal.GetViewRow(row);
         var runs = _runBuilder.Build(cells);
         var y = row * _metrics.Height;
 
@@ -319,8 +493,6 @@ public sealed class TerminalView : Control
             var x = run.Column * _metrics.Width;
             var width = run.Length * _metrics.Width;
 
-            // The whole view was already filled with the theme background, so a run that matches it
-            // needs no rectangle of its own.
             if (background != _theme.Background)
             {
                 context.FillRectangle(GetBrush(background), new Rect(x, y, width, _metrics.Height));
@@ -332,12 +504,47 @@ public sealed class TerminalView : Control
             }
 
             var text = _runBuilder.GetRunText(cells, in run);
-            if (text.Length == 0)
-            {
-                continue;
-            }
 
-            DrawRunText(context, text, run.Style, foreground, x, y, width);
+            if (text.Length > 0)
+            {
+                DrawRunText(context, text, run.Style, foreground, x, y, width);
+            }
+        }
+
+        RenderSelection(context, row, cells.Length, y);
+    }
+
+    /// <summary>
+    /// Paints the selection over the row.
+    /// </summary>
+    /// <remarks>
+    /// Drawn as an overlay in the theme's selection colour rather than by re-colouring cells, so
+    /// that a change to the selection never has to touch terminal state.
+    /// </remarks>
+    private void RenderSelection(DrawingContext context, int row, int columns, double y)
+    {
+        if (_selection is not { IsEmpty: false } selection)
+        {
+            return;
+        }
+
+        var start = -1;
+
+        for (var column = 0; column <= columns; column++)
+        {
+            var selected = column < columns && selection.Contains(column, row);
+
+            if (selected && start < 0)
+            {
+                start = column;
+            }
+            else if (!selected && start >= 0)
+            {
+                var x = start * _metrics.Width;
+                var width = (column - start) * _metrics.Width;
+                context.FillRectangle(GetBrush(_theme.SelectionBackground), new Rect(x, y, width, _metrics.Height));
+                start = -1;
+            }
         }
     }
 
@@ -350,25 +557,27 @@ public sealed class TerminalView : Control
         double y,
         double width)
     {
-        var typeface = style.HasAttributes(TextAttributes.Bold) || style.HasAttributes(TextAttributes.Italic)
+        var isBold = style.HasAttributes(TextAttributes.Bold);
+        var isItalic = style.HasAttributes(TextAttributes.Italic);
+
+        var typeface = isBold || isItalic
             ? new Typeface(
                 _typeface.FontFamily,
-                style.HasAttributes(TextAttributes.Italic) ? FontStyle.Italic : FontStyle.Normal,
-                style.HasAttributes(TextAttributes.Bold) ? FontWeight.Bold : FontWeight.Normal)
+                isItalic ? FontStyle.Italic : FontStyle.Normal,
+                isBold ? FontWeight.Bold : FontWeight.Normal)
             : _typeface;
 
         var brush = GetBrush(foreground);
 
         var formatted = new FormattedText(
             text,
-            System.Globalization.CultureInfo.InvariantCulture,
+            CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             typeface,
             _appearance.FontSize,
             brush);
 
-        // The text is positioned by its baseline so that glyphs sit on a common line regardless of
-        // their individual heights.
+        // Text is positioned by its baseline so glyphs sit on a common line regardless of height.
         context.DrawText(formatted, new Point(x, y + _metrics.Baseline - formatted.Baseline));
 
         if (style.HasAttributes(TextAttributes.Underline))
@@ -381,8 +590,7 @@ public sealed class TerminalView : Control
         if (style.HasAttributes(TextAttributes.Strikethrough))
         {
             var thickness = Math.Max(1, _metrics.Height * UnderlineThicknessFactor);
-            var strikeY = y + (_metrics.Height / 2);
-            context.FillRectangle(brush, new Rect(x, strikeY, width, thickness));
+            context.FillRectangle(brush, new Rect(x, y + (_metrics.Height / 2), width, thickness));
         }
     }
 
@@ -390,7 +598,9 @@ public sealed class TerminalView : Control
     {
         var cursor = _terminal.Cursor;
 
-        if (!cursor.IsVisible)
+        // While reading history there is no meaningful place for the cursor: the prompt it belongs
+        // to is somewhere else entirely.
+        if (!cursor.IsVisible || _terminal.IsScrolledBack)
         {
             return;
         }
@@ -400,8 +610,7 @@ public sealed class TerminalView : Control
             return;
         }
 
-        var size = _terminal.Size;
-        if (!size.Contains(cursor.Column, cursor.Row))
+        if (!_terminal.Size.Contains(cursor.Column, cursor.Row))
         {
             return;
         }
@@ -431,11 +640,11 @@ public sealed class TerminalView : Control
 
                     if (!cell.IsEmpty)
                     {
-                        // Redraw the character in the cursor's contrasting colour so it stays legible
-                        // underneath a solid block.
+                        // Redraw the character in a contrasting colour so it stays legible under a
+                        // solid block.
                         var formatted = new FormattedText(
                             cell.DisplayCharacter.ToString(),
-                            System.Globalization.CultureInfo.InvariantCulture,
+                            CultureInfo.InvariantCulture,
                             FlowDirection.LeftToRight,
                             _typeface,
                             _appearance.FontSize,
@@ -461,8 +670,8 @@ public sealed class TerminalView : Control
 
         if (style.HasAttributes(TextAttributes.Faint))
         {
-            // Faint is defined as reduced intensity, which means blending toward the background
-            // rather than picking a fixed grey - the result has to work on any theme.
+            // Faint means reduced intensity, so it is computed against the actual background and
+            // works on a light theme as well as a dark one.
             foreground = foreground.Blend(background, FaintBlendAmount);
         }
 
@@ -519,14 +728,14 @@ public sealed class TerminalView : Control
     /// </summary>
     /// <remarks>
     /// The grid's geometry has to come from the font, not from a guess: if the assumed advance
-    /// width disagrees with the real one by even a fraction of a pixel, the error accumulates
-    /// across a row and the right-hand columns drift out of alignment.
+    /// width disagrees with the real one by a fraction of a pixel, the error accumulates across a
+    /// row and the right-hand columns drift out of alignment.
     /// </remarks>
     private static CellMetrics MeasureCell(Typeface typeface, AppearanceOptions appearance)
     {
         var reference = new FormattedText(
             "M",
-            System.Globalization.CultureInfo.InvariantCulture,
+            CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight,
             typeface,
             appearance.FontSize,

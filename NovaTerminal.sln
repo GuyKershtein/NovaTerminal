@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaTerminal.Integration.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaTerminal.Terminal.Tests", "tests\NovaTerminal.Terminal.Tests\NovaTerminal.Terminal.Tests.csproj", "{322A3A4F-CB86-4784-92D7-ADB42FD9F9AB}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NovaTerminal.PtyHarness", "tests\NovaTerminal.PtyHarness\NovaTerminal.PtyHarness.csproj", "{C6B95500-DA7E-425F-9DDD-10AFB350E87E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -157,6 +159,18 @@ Global
 		{322A3A4F-CB86-4784-92D7-ADB42FD9F9AB}.Release|x64.Build.0 = Release|Any CPU
 		{322A3A4F-CB86-4784-92D7-ADB42FD9F9AB}.Release|x86.ActiveCfg = Release|Any CPU
 		{322A3A4F-CB86-4784-92D7-ADB42FD9F9AB}.Release|x86.Build.0 = Release|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Debug|x64.Build.0 = Debug|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Debug|x86.Build.0 = Debug|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Release|x64.ActiveCfg = Release|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Release|x64.Build.0 = Release|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Release|x86.ActiveCfg = Release|Any CPU
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -172,5 +186,6 @@ Global
 		{DEA4CDE8-C94D-4FE2-BAFD-35F448760DE5} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{03510D36-ACFE-40C3-B0DA-2879AB35C062} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{322A3A4F-CB86-4784-92D7-ADB42FD9F9AB} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{C6B95500-DA7E-425F-9DDD-10AFB350E87E} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

@@ -7,6 +7,33 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestones 9 to 13
+
+- **Scrollback**: a bounded ring of retained lines that recycles the line it evicts, so scrolling at
+  steady state allocates nothing. The bound is a hard limit, not a preference: terminal output can
+  be infinite. Only the primary screen retains history.
+- **Viewport**: the renderer draws rows 0..n-1 and never learns whether they came from history or
+  from the live screen. Output or typing snaps the view back to the prompt.
+- **Selection, copy and paste**: cell-based selection with linear and block modes, word and line
+  selection, trailing blanks dropped, wrapped rows rejoined into one line, and bracketed paste.
+- **Search** over history and screen, with wrap-around next/previous and bounded results.
+- **Tabs**: independent terminals, each with its own engine, scrollback, shell and pump.
+- **Startup watchdog**: a shell that starts but produces nothing gets diagnosed on the terminal
+  itself rather than leaving a blank window.
+
+### Fixed
+
+- The ConPTY tests now run out of process, against the real backend, and pass. See below.
+
+### Notes
+
+- **A process that owns a console cannot bind a child to a pseudo console.** The child attaches to
+  the inherited console instead and the pseudo console receives nothing; `FreeConsole` does not undo
+  it. NovaTerminal is a GUI executable so it is unaffected, but xUnit v3 requires a console test
+  host, which is why `tests/NovaTerminal.PtyHarness` exists. An earlier changelog entry attributed
+  this to endpoint security software; that was wrong, and the difference is the subsystem of the
+  host process. See [docs/troubleshooting.md](docs/troubleshooting.md).
+
 ### Added — Milestone 7: terminal features
 
 - Alternate screen buffer (modes 1049, 1047 and 47), so a full-screen program can take over the

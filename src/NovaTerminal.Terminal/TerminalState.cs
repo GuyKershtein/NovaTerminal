@@ -106,6 +106,10 @@ public sealed partial class TerminalState
     /// </remarks>
     public void Print(Rune rune)
     {
+        // Output arriving while the user is reading history takes them back to the live screen,
+        // rather than leaving them watching a static page while the terminal changes underneath.
+        ScrollViewToBottom();
+
         rune = TranslateForCharacterSet(rune);
 
         var width = CharacterWidth.Measure(rune);

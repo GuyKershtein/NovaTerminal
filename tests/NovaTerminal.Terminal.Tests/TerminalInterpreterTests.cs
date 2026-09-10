@@ -10,7 +10,7 @@ namespace NovaTerminal.Terminal.Tests;
 /// </summary>
 public sealed class TerminalInterpreterTests
 {
-    private const string Esc = "";
+    private const string Esc = "\u001b";
 
     [Fact]
     public void ColouredText_IsPrintedWithTheColourApplied()
@@ -51,8 +51,8 @@ public sealed class TerminalInterpreterTests
     }
 
     [Theory]
-    [InlineData("[38;5;200m", 200)]
-    [InlineData("[38:5:200m", 200)]
+    [InlineData("\u001b[38;5;200m", 200)]
+    [InlineData("\u001b[38:5:200m", 200)]
     public void ExtendedIndexedColour_IsAcceptedInBothSpellings(string sequence, int expectedIndex)
     {
         var terminal = Feed(sequence + "X");
@@ -61,9 +61,9 @@ public sealed class TerminalInterpreterTests
     }
 
     [Theory]
-    [InlineData("[38;2;10;20;30m")]
-    [InlineData("[38:2:10:20:30m")]
-    [InlineData("[38:2::10:20:30m")]
+    [InlineData("\u001b[38;2;10;20;30m")]
+    [InlineData("\u001b[38:2:10:20:30m")]
+    [InlineData("\u001b[38:2::10:20:30m")]
     public void TrueColour_IsAcceptedInAllThreeSpellings(string sequence)
     {
         var terminal = Feed(sequence + "X");

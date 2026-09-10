@@ -9,7 +9,10 @@ libraries underneath it.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
-![NovaTerminal rendering colours, attributes and wide glyphs](docs/images/novaterminal-milestone4.png)
+![NovaTerminal running PowerShell](docs/images/novaterminal-shell.png)
+
+*PowerShell running inside NovaTerminal: real pseudo-terminal, real shell, everything drawn by the
+engine and renderer in this repository.*
 
 ---
 
@@ -27,8 +30,12 @@ repository — nothing is listed as working until it is implemented and tested.
 | 5, 8 | ConPTY shell backend | ✅ Done |
 | 6 | Shell ↔ terminal wiring, keyboard input | ✅ Done |
 | 7 | Alternate screen, character sets, modes | ✅ Done |
-| 9 | Resize support | ⬜ Planned |
-| 10–18 | Copy/paste, scrollback, tabs, search, themes, performance, polish | ⬜ Planned |
+| 9 | Resize (viewport → engine → pseudo console) | ✅ Done |
+| 10 | Selection, copy and paste | ✅ Done |
+| 11 | Scrollback | ✅ Done |
+| 12 | Tabs | ✅ Done |
+| 13 | Search | ✅ Done |
+| 14–18 | Themes/config, performance, tests, CI, polish | ⏳ In progress |
 
 ## Features
 

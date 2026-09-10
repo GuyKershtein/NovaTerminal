@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      A GUI-subsystem executable, deliberately. A process that owns a console cannot bind a child
+      to a pseudo console, and xUnit v3 requires a console test host - so this scenario has to run
+      out of process to be exercised at all.
+    -->
+    <OutputType>WinExe</OutputType>
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/NovaTerminal.Platform/NovaTerminal.Platform.csproj" />
+    <ProjectReference Include="../../src/NovaTerminal.Terminal/NovaTerminal.Terminal.csproj" />
+  </ItemGroup>
+
+</Project>

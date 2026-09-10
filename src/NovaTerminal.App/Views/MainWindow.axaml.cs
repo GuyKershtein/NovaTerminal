@@ -1,5 +1,7 @@
-using System.Text;
+using System.Globalization;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Media;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -8,83 +10,97 @@ using NovaTerminal.App.Logging;
 using NovaTerminal.App.Sessions;
 using NovaTerminal.Core;
 using NovaTerminal.Core.Configuration;
+using NovaTerminal.Input;
 using NovaTerminal.Platform;
 using NovaTerminal.Process;
 using NovaTerminal.Rendering;
 using NovaTerminal.Terminal;
-using NovaTerminal.Terminal.Parsing;
+using TerminalTheme = NovaTerminal.Rendering.TerminalTheme;
 
 namespace NovaTerminal.App.Views;
 
 /// <summary>
-/// The application's main window: a terminal surface, a shell session and a status line.
+/// The application window: a tab strip, a terminal surface, a search bar and a status line.
 /// </summary>
 /// <remarks>
-/// Dependencies arrive through the constructor rather than being fetched from a static provider,
-/// which is what lets the terminal view be constructed in tests and, later, once per tab.
+/// The window owns tabs and routes user intent to whichever is active. It contains no terminal
+/// logic: everything it does is create a tab, hand input to it, or ask it for text.
 /// </remarks>
 public partial class MainWindow : Window, IDisposable
 {
+    private const int PageScrollLines = 20;
+
     private readonly NovaTerminalOptions _options;
     private readonly ILogger<MainWindow> _logger;
     private readonly ILoggerFactory _loggerFactory;
-    private readonly TerminalState _terminal;
-    private readonly TerminalView _view;
+    private readonly TerminalTheme _theme;
+    private readonly List<TerminalTab> _tabs = [];
 
-    private TerminalSession? _session;
+    private IShellBackend? _backend;
+    private TerminalTab? _activeTab;
+    private IReadOnlyList<SearchMatch> _matches = [];
+    private int _matchIndex = -1;
+    private bool _disposed;
 
     /// <summary>
-    /// Design-time constructor. The XAML previewer and the runtime XAML loader need a public
-    /// parameterless constructor; at run time the application always uses the injecting overload.
+    /// Design-time constructor, needed by the XAML previewer and the runtime XAML loader.
     /// </summary>
     public MainWindow()
         : this(new NovaTerminalOptions(), NullLogger<MainWindow>.Instance, NullLoggerFactory.Instance)
     {
     }
 
-    /// <summary>Creates the main window with its dependencies.</summary>
+    /// <summary>Creates the window with its dependencies.</summary>
     [ActivatorUtilitiesConstructor]
     public MainWindow(NovaTerminalOptions options, ILogger<MainWindow> logger, ILoggerFactory loggerFactory)
     {
         _options = options;
         _logger = logger;
         _loggerFactory = loggerFactory;
+        _theme = BuiltInThemes.GetOrDefault(options.Appearance.ThemeName);
 
         InitializeComponent();
 
-        var theme = BuiltInThemes.GetOrDefault(options.Appearance.ThemeName);
-
-        _terminal = new TerminalState(options.Terminal.InitialSize);
-
-        _view = new TerminalView(_terminal, theme, options.Appearance);
-        _view.ViewportSizeChanged += OnViewportSizeChanged;
-        _view.InputProduced += OnInputProduced;
-        TerminalHost.Child = _view;
-
         Background = new SolidColorBrush(
-            Color.FromRgb(theme.Background.Red, theme.Background.Green, theme.Background.Blue));
+            Color.FromRgb(_theme.Background.Red, _theme.Background.Green, _theme.Background.Blue));
 
         Title = $"{AppInfo.Name} {AppInfo.Version}";
-        UpdateStatus();
+
+        NewTabButton.Click += async (_, _) => await AddTabAsync().ConfigureAwait(true);
+        SearchBox.KeyDown += OnSearchBoxKeyDown;
+        SearchBox.TextChanged += (_, _) => RunSearch();
+        SearchNextButton.Click += (_, _) => StepMatch(1);
+        SearchPreviousButton.Click += (_, _) => StepMatch(-1);
 
         Opened += OnOpened;
         Closing += OnClosing;
+        KeyDown += OnWindowKeyDown;
 
-        var size = _terminal.Size;
-        _logger.WindowInitialised(size.Columns, size.Rows, options.Terminal.ScrollbackLines);
+        UpdateStatus();
     }
 
-    /// <summary>The terminal being displayed.</summary>
-    public TerminalState Terminal => _terminal;
+    /// <summary>The active tab's terminal, or null before the first tab exists.</summary>
+    public TerminalState? Terminal => _activeTab?.Terminal;
 
-    /// <summary>The running session, once a shell has been started.</summary>
-    public TerminalSession? Session => _session;
+    /// <summary>The tabs currently open.</summary>
+    public IReadOnlyList<TerminalTab> Tabs => _tabs;
 
-    /// <summary>Disposes the session if the window is torn down without closing normally.</summary>
+    /// <inheritdoc />
     public void Dispose()
     {
-        _session?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        _session = null;
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+
+        foreach (var tab in _tabs)
+        {
+            tab.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+
+        _tabs.Clear();
         GC.SuppressFinalize(this);
     }
 
@@ -92,7 +108,8 @@ public partial class MainWindow : Window, IDisposable
     {
         try
         {
-            await StartShellAsync().ConfigureAwait(true);
+            _backend = ShellBackendFactory.Create(_loggerFactory);
+            await AddTabAsync().ConfigureAwait(true);
         }
         catch (Exception exception)
         {
@@ -101,136 +118,435 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
-    private async Task StartShellAsync()
-    {
-        var backend = ShellBackendFactory.Create(_loggerFactory);
-        var executable = _options.Shell.Executable ?? backend.GetDefaultShellExecutable();
-
-        var environment = new Dictionary<string, string>(_options.Shell.Environment, StringComparer.Ordinal)
-        {
-            // TERM is how a program discovers what the terminal can do. Claiming xterm-256color is
-            // a promise: everything that name implies has to actually work.
-            ["TERM"] = _options.Terminal.TermName,
-        };
-
-        var sessionOptions = new ShellSessionOptions(
-            executable,
-            [.. _options.Shell.Arguments],
-            _options.Shell.WorkingDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            environment,
-            _terminal.Size);
-
-        var shell = backend.CreateSession(sessionOptions);
-
-        _session = new TerminalSession(shell, _terminal, _loggerFactory.CreateLogger<TerminalSession>());
-        _session.OutputApplied += OnOutputApplied;
-        _session.TitleChanged += OnTitleChanged;
-        _session.Exited += OnSessionExited;
-
-        await _session.StartAsync().ConfigureAwait(true);
-
-        _logger.SessionCreated(shell.Id, executable, _terminal.Size.Columns, _terminal.Size.Rows);
-        _view.Focus();
-        UpdateStatus();
-    }
-
     private async void OnClosing(object? sender, WindowClosingEventArgs e)
     {
-        if (_session is not { } session)
+        var tabs = _tabs.ToArray();
+        _tabs.Clear();
+        _activeTab = null;
+
+        foreach (var tab in tabs)
+        {
+            var id = tab.Session?.Shell.Id;
+            await tab.DisposeAsync().ConfigureAwait(true);
+
+            if (id is not null)
+            {
+                _logger.SessionClosed(id);
+            }
+        }
+    }
+
+    private async Task AddTabAsync()
+    {
+        if (_backend is null)
         {
             return;
         }
 
-        _session = null;
-        await session.DisposeAsync().ConfigureAwait(true);
-        _logger.SessionClosed(session.Shell.Id);
-    }
+        var tab = new TerminalTab(_options, _theme, _loggerFactory);
 
-    private void OnOutputApplied(object? sender, EventArgs e)
-    {
-        _view.InvalidateDamagedRows();
+        tab.View.ViewportSizeChanged += async (_, size) => await OnViewportSizeChanged(tab, size).ConfigureAwait(true);
+        tab.View.InputProduced += async (_, data) => await tab.WriteAsync(data).ConfigureAwait(true);
+        tab.View.SelectionChanged += (_, _) => UpdateStatus();
+        tab.OutputApplied += OnTabOutputApplied;
+        tab.TitleChanged += (_, _) => RefreshTabStrip();
+        tab.Exited += OnTabExited;
+
+        _tabs.Add(tab);
+        ActivateTab(tab);
+        RefreshTabStrip();
+
+        try
+        {
+            await tab.StartAsync(_backend).ConfigureAwait(true);
+
+            if (tab.Session is { } session)
+            {
+                _logger.SessionCreated(
+                    session.Shell.Id, tab.Title, tab.Terminal.Size.Columns, tab.Terminal.Size.Rows);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.SessionStartFailed(exception);
+            ShowFailure(exception);
+        }
+
         UpdateStatus();
     }
 
-    private void OnSessionExited(object? sender, ShellExitedEventArgs e)
+    private async Task CloseTabAsync(TerminalTab tab)
     {
-        var reason = e.ExitCode is { } code
-            ? $"shell exited with code {code}"
-            : e.Error?.Message ?? "shell ended";
-
-        StatusText.Text = $"{reason}   close the window to finish";
-        _view.InvalidateDamagedRows();
-    }
-
-    private async void OnInputProduced(object? sender, ReadOnlyMemory<byte> data)
-    {
-        if (_session is not { IsRunning: true } session)
+        if (!_tabs.Remove(tab))
         {
             return;
         }
 
-        await session.WriteAsync(data).ConfigureAwait(true);
-    }
+        var id = tab.Session?.Shell.Id;
+        await tab.DisposeAsync().ConfigureAwait(true);
 
-    private void OnTitleChanged(object? sender, string title)
-        => Title = string.IsNullOrWhiteSpace(title) ? AppInfo.Name : $"{title} - {AppInfo.Name}";
-
-    private async void OnViewportSizeChanged(object? sender, TerminalSize size)
-    {
-        if (size == _terminal.Size)
+        if (id is not null)
         {
+            _logger.SessionClosed(id);
+        }
+
+        if (_tabs.Count == 0)
+        {
+            // Closing the last tab closes the window, which is what every terminal does.
+            Close();
             return;
         }
 
-        if (_session is { } session)
+        if (_activeTab == tab)
         {
-            // The engine and the pseudo console have to be resized together, and the session owns
-            // the ordering that makes that safe.
-            await session.ResizeAsync(size).ConfigureAwait(true);
-        }
-        else
-        {
-            _terminal.Resize(size);
+            ActivateTab(_tabs[^1]);
         }
 
-        _view.InvalidateDamagedRows();
+        RefreshTabStrip();
         UpdateStatus();
     }
 
-    /// <summary>
-    /// Writes a failure onto the terminal itself, in red.
-    /// </summary>
-    /// <remarks>
-    /// A terminal that cannot start a shell should explain itself on its own screen rather than
-    /// closing silently: the message is the only thing the user has to go on.
-    /// </remarks>
+    private void ActivateTab(TerminalTab tab)
+    {
+        _activeTab = tab;
+        TerminalHost.Child = tab.View;
+        Title = $"{tab.Title} - {AppInfo.Name}";
+
+        ClearSearch();
+        tab.View.Focus();
+        RefreshTabStrip();
+        UpdateStatus();
+    }
+
+    private void SelectTabByOffset(int offset)
+    {
+        if (_activeTab is null || _tabs.Count < 2)
+        {
+            return;
+        }
+
+        var index = _tabs.IndexOf(_activeTab);
+        var next = ((index + offset) % _tabs.Count + _tabs.Count) % _tabs.Count;
+        ActivateTab(_tabs[next]);
+    }
+
+    private void RefreshTabStrip()
+    {
+        // A single-session terminal should look like a terminal, not a tabbed application.
+        TabStrip.IsVisible = _tabs.Count > 1;
+
+        var buttons = new List<Control>(_tabs.Count);
+
+        foreach (var tab in _tabs)
+        {
+            var isActive = tab == _activeTab;
+
+            var label = new TextBlock
+            {
+                Text = Truncate(tab.Title, 22),
+                FontSize = 12,
+                Foreground = new SolidColorBrush(isActive ? Colors.White : Color.FromRgb(0x8A, 0x91, 0xA5)),
+            };
+
+            var close = new Button
+            {
+                Content = "x",
+                FontSize = 10,
+                Padding = new Avalonia.Thickness(4, 0),
+                Margin = new Avalonia.Thickness(6, 0, 0, 0),
+                Background = Brushes.Transparent,
+                BorderThickness = default,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x91, 0xA5)),
+            };
+
+            var closing = tab;
+            close.Click += async (_, _) => await CloseTabAsync(closing).ConfigureAwait(true);
+
+            var content = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal };
+            content.Children.Add(label);
+            content.Children.Add(close);
+
+            var button = new Button
+            {
+                Content = content,
+                Padding = new Avalonia.Thickness(10, 5),
+                Background = isActive
+                    ? new SolidColorBrush(Color.FromRgb(0x11, 0x13, 0x1A))
+                    : Brushes.Transparent,
+                BorderThickness = default,
+            };
+
+            var selecting = tab;
+            button.Click += (_, _) => ActivateTab(selecting);
+
+            buttons.Add(button);
+        }
+
+        TabItems.ItemsSource = buttons;
+    }
+
+    private void OnTabOutputApplied(object? sender, EventArgs e)
+    {
+        if (sender is TerminalTab tab && tab == _activeTab)
+        {
+            tab.View.InvalidateDamagedRows();
+            UpdateStatus();
+        }
+    }
+
+    private void OnTabExited(object? sender, ShellExitedEventArgs e)
+    {
+        if (sender is not TerminalTab tab)
+        {
+            return;
+        }
+
+        var reason = e.ExitCode is { } code ? $"exited with code {code}" : e.Error?.Message ?? "ended";
+        StatusText.Text = $"{tab.Title}: shell {reason}";
+        tab.View.InvalidateDamagedRows();
+    }
+
+    private async Task OnViewportSizeChanged(TerminalTab tab, TerminalSize size)
+    {
+        if (size == tab.Terminal.Size)
+        {
+            return;
+        }
+
+        // The engine and the pseudo console are resized together; the session owns that ordering.
+        await tab.ResizeAsync(size).ConfigureAwait(true);
+        tab.View.InvalidateDamagedRows();
+        UpdateStatus();
+    }
+
+    // ----- Shortcuts -----
+
+    private async void OnWindowKeyDown(object? sender, KeyEventArgs e)
+    {
+        var control = e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control);
+        var shift = e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Shift);
+
+        // Ctrl+Shift is the terminal convention for the emulator's own shortcuts, precisely because
+        // plain Ctrl combinations belong to the program running inside.
+        if (control && shift)
+        {
+            switch (e.Key)
+            {
+                case Key.C:
+                    await CopyAsync().ConfigureAwait(true);
+                    e.Handled = true;
+                    return;
+                case Key.V:
+                    await PasteAsync().ConfigureAwait(true);
+                    e.Handled = true;
+                    return;
+                case Key.A:
+                    _activeTab?.View.SelectAll();
+                    e.Handled = true;
+                    return;
+                case Key.F:
+                    ToggleSearch();
+                    e.Handled = true;
+                    return;
+                case Key.T:
+                    await AddTabAsync().ConfigureAwait(true);
+                    e.Handled = true;
+                    return;
+                case Key.W when _activeTab is { } tab:
+                    await CloseTabAsync(tab).ConfigureAwait(true);
+                    e.Handled = true;
+                    return;
+                case Key.Tab:
+                    SelectTabByOffset(shift ? -1 : 1);
+                    e.Handled = true;
+                    return;
+            }
+        }
+
+        if (control && e.Key == Key.Tab)
+        {
+            SelectTabByOffset(1);
+            e.Handled = true;
+            return;
+        }
+
+        if (shift && _activeTab is { } scrolled)
+        {
+            switch (e.Key)
+            {
+                case Key.PageUp:
+                    scrolled.View.ScrollBy(PageScrollLines);
+                    e.Handled = true;
+                    return;
+                case Key.PageDown:
+                    scrolled.View.ScrollBy(-PageScrollLines);
+                    e.Handled = true;
+                    return;
+            }
+        }
+
+        if (e.Key == Key.Escape && SearchBar.IsVisible && SearchBox.IsFocused)
+        {
+            ClearSearch();
+            e.Handled = true;
+        }
+    }
+
+    private async Task CopyAsync()
+    {
+        if (_activeTab is not { } tab || !tab.View.HasSelection || Clipboard is null)
+        {
+            return;
+        }
+
+        await Clipboard.SetTextAsync(tab.View.SelectedText).ConfigureAwait(true);
+    }
+
+    private async Task PasteAsync()
+    {
+        if (_activeTab is not { } tab || Clipboard is null)
+        {
+            return;
+        }
+
+        var text = await Clipboard.TryGetTextAsync().ConfigureAwait(true);
+
+        if (string.IsNullOrEmpty(text))
+        {
+            return;
+        }
+
+        // Bracketed paste, when the program asked for it, lets a shell tell pasted text from typing
+        // and refuse to execute a newline hidden inside it.
+        await tab.WriteAsync(KeyEncoder.EncodePaste(text, tab.View.InputModes)).ConfigureAwait(true);
+    }
+
+    // ----- Search -----
+
+    private void ToggleSearch()
+    {
+        if (SearchBar.IsVisible)
+        {
+            ClearSearch();
+            return;
+        }
+
+        SearchBar.IsVisible = true;
+        SearchBox.Focus();
+        SearchBox.SelectAll();
+    }
+
+    private void ClearSearch()
+    {
+        SearchBar.IsVisible = false;
+        SearchStatus.Text = string.Empty;
+        _matches = [];
+        _matchIndex = -1;
+        _activeTab?.View.Focus();
+    }
+
+    private void OnSearchBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            StepMatch(e.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Shift) ? -1 : 1);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Escape)
+        {
+            ClearSearch();
+            e.Handled = true;
+        }
+    }
+
+    private void RunSearch()
+    {
+        if (_activeTab is not { } tab)
+        {
+            return;
+        }
+
+        var query = SearchBox.Text ?? string.Empty;
+
+        if (query.Length == 0)
+        {
+            _matches = [];
+            _matchIndex = -1;
+            SearchStatus.Text = string.Empty;
+            return;
+        }
+
+        _matches = TerminalSearch.FindAll(tab.Terminal, query);
+        _matchIndex = _matches.Count > 0 ? 0 : -1;
+
+        ShowMatch();
+    }
+
+    private void StepMatch(int direction)
+    {
+        if (_matches.Count == 0)
+        {
+            RunSearch();
+            return;
+        }
+
+        // Wrapping round is what a user expects from find-next at the end of the history.
+        _matchIndex = ((_matchIndex + direction) % _matches.Count + _matches.Count) % _matches.Count;
+        ShowMatch();
+    }
+
+    private void ShowMatch()
+    {
+        if (_activeTab is not { } tab)
+        {
+            return;
+        }
+
+        if (_matchIndex < 0 || _matches.Count == 0)
+        {
+            SearchStatus.Text = "no matches";
+            return;
+        }
+
+        var match = _matches[_matchIndex];
+        var offset = TerminalSearch.GetViewportOffsetFor(tab.Terminal, match.Line);
+
+        tab.Terminal.ScrollViewToBottom();
+        tab.Terminal.ScrollViewBack(offset);
+        tab.View.InvalidateVisual();
+
+        SearchStatus.Text = string.Create(
+            CultureInfo.InvariantCulture, $"{_matchIndex + 1} of {_matches.Count}");
+    }
+
+    // ----- Status -----
+
     private void ShowFailure(Exception exception)
     {
-        const string Csi = "\u001b[";
-        const string NewLine = "\r\n";
-
-        var message =
-            $"{Csi}1;31mNovaTerminal could not start a shell.{Csi}0m" + NewLine + NewLine +
-            $"  {exception.Message}" + NewLine + NewLine +
-            $"{Csi}90m  See the log for details.{Csi}0m" + NewLine;
-
-        var interpreter = new TerminalInterpreter(_terminal);
-        new AnsiParser(interpreter).Parse(Encoding.UTF8.GetBytes(message));
-        _view.InvalidateDamagedRows();
+        StatusText.Text = $"could not start a shell: {exception.Message}";
     }
 
     private void UpdateStatus()
     {
-        var size = _terminal.Size;
-        var metrics = _view.CellMetrics;
-        var shell = _session is { } session
-            ? $"shell {session.Shell.Id} {(session.IsRunning ? "running" : "stopped")}"
-            : "no shell";
+        if (_activeTab is not { } tab)
+        {
+            StatusText.Text = "starting";
+            return;
+        }
 
-        StatusText.Text =
-            $"{size.Columns}x{size.Rows} cells   " +
-            $"cell {metrics.Width:0.##}x{metrics.Height:0.##} px   " +
-            $"theme {_options.Appearance.ThemeName}   " +
-            $"{shell}";
+        var size = tab.Terminal.Size;
+        var scrollback = tab.Terminal.Scrollback?.Count ?? 0;
+        var state = tab.IsRunning ? "running" : "stopped";
+        var selection = tab.View.HasSelection ? "   selection" : string.Empty;
+        var scrolled = tab.Terminal.IsScrolledBack
+            ? $"   scrolled back {tab.Terminal.ViewportOffset}"
+            : string.Empty;
+
+        StatusText.Text = string.Create(
+            CultureInfo.InvariantCulture,
+            $"{size.Columns}x{size.Rows}   {scrollback} lines of history   {_tabs.Count} tab(s)   {state}{scrolled}{selection}");
     }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : value[..(maxLength - 1)] + "…";
 }

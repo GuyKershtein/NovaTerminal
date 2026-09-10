@@ -55,13 +55,13 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
     private const int OscSetIconName = 1;
     private const int OscSetTitle = 2;
 
-    private static readonly byte[] TerminalOkResponse = "[0n"u8.ToArray();
+    private static readonly byte[] TerminalOkResponse = "\u001b[0n"u8.ToArray();
 
     /// <summary>
     /// Primary Device Attributes reply. Identifies as a VT100 with the Advanced Video Option, which
     /// is what most software expects and what xterm reports by default.
     /// </summary>
-    private static readonly byte[] DeviceAttributesResponse = "[?1;2c"u8.ToArray();
+    private static readonly byte[] DeviceAttributesResponse = "\u001b[?1;2c"u8.ToArray();
 
     private readonly TerminalState _terminal;
     private readonly ILogger _logger;
@@ -522,13 +522,22 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
         }
     }
 
+    private const int EraseScrollback = 3;
+
     private void EraseInDisplay(in CsiSequence sequence)
     {
         var parameter = sequence.GetOrDefault(0, 0);
 
+        if (parameter == EraseScrollback)
+        {
+            // "Erase saved lines": what a shell's clear command sends to make the history
+            // unreachable as well as the screen blank.
+            _terminal.ClearScrollback();
+            return;
+        }
+
         if (!TryGetEraseExtent(parameter, out var extent))
         {
-            // Parameter 3 erases the scrollback, which does not exist yet.
             ReportUnsupported(SequenceKind.Csi, CsiFinal.EraseInDisplay, (char)parameter, CsiSequence.None);
             return;
         }
@@ -620,7 +629,7 @@ public sealed class TerminalInterpreter : ITerminalOutputHandler
                     var column = _terminal.Cursor.Column + 1;
                     var reply = string.Create(
                         CultureInfo.InvariantCulture,
-                        $"[{row};{column}R");
+                        $"\u001b[{row};{column}R");
                     Respond(Encoding.ASCII.GetBytes(reply));
                     break;
                 }

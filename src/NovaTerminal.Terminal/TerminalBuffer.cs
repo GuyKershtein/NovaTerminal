@@ -45,6 +45,16 @@ public sealed class TerminalBuffer
     /// <summary>The buffer's dimensions.</summary>
     public TerminalSize Size { get; private set; }
 
+    /// <summary>
+    /// Where lines go when they scroll off the top, or <see langword="null"/> when this buffer
+    /// keeps no history.
+    /// </summary>
+    /// <remarks>
+    /// Only the primary screen has scrollback. Retaining the intermediate states of a full-screen
+    /// editor would fill the history with half-drawn screens that mean nothing on their own.
+    /// </remarks>
+    public Scrollback? Scrollback { get; set; }
+
     /// <summary>True when any row has changed since damage was last cleared.</summary>
     public bool HasDamage { get; private set; }
 
@@ -158,6 +168,8 @@ public sealed class TerminalBuffer
             return;
         }
 
+        var retainHistory = Scrollback is { IsDisabled: false } && IsFullScreen(region);
+
         var recycled = ArrayPool<TerminalLine>.Shared.Rent(count);
         try
         {
@@ -167,6 +179,14 @@ public sealed class TerminalBuffer
             for (var offset = 0; offset < count; offset++)
             {
                 var line = recycled[offset];
+
+                if (retainHistory)
+                {
+                    // The line entering history keeps its contents; the one that fell out of
+                    // history is reused in its place, so steady-state scrolling allocates nothing.
+                    line = Scrollback!.Add(line) ?? new TerminalLine(Size.Columns);
+                }
+
                 line.Clear(style);
                 _lines[region.Bottom - count + 1 + offset] = line;
             }
@@ -331,6 +351,9 @@ public sealed class TerminalBuffer
 
         return builder.ToString();
     }
+
+    /// <summary>Whether a region covers the entire screen rather than a band within it.</summary>
+    private bool IsFullScreen(ScrollRegion region) => region.Top == 0 && region.Bottom == Size.Rows - 1;
 
     private void ThrowIfRowOutOfRange(int row)
     {

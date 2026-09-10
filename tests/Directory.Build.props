@@ -3,10 +3,10 @@
 
   <PropertyGroup>
     <IsPackable>false</IsPackable>
-    <IsTestProject>true</IsTestProject>
+    <IsTestProject Condition="'$(IsTestProject)' == ''">true</IsTestProject>
 
     <!-- xUnit v3 test projects are self-hosting executables. -->
-    <OutputType>Exe</OutputType>
+    <OutputType Condition="'$(OutputType)' == ''">Exe</OutputType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
 
     <!--
@@ -19,11 +19,11 @@
     <UseVSTest>false</UseVSTest>
   </PropertyGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
 
-  <ItemGroup>
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
     <Using Include="Xunit" />
   </ItemGroup>
 </Project>

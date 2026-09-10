@@ -1,9 +1,6 @@
-using System.Text;
-using NovaTerminal.Core;
+using System.Diagnostics;
 using NovaTerminal.Platform;
 using NovaTerminal.Process;
-using NovaTerminal.Terminal;
-using NovaTerminal.Terminal.Parsing;
 
 namespace NovaTerminal.Integration.Tests;
 
@@ -12,160 +9,41 @@ namespace NovaTerminal.Integration.Tests;
 /// </summary>
 /// <remarks>
 /// <para>
-/// These are deliberately not mocked. The whole point of the platform layer is that it talks to the
-/// operating system correctly, and no test double can tell you whether
-/// <c>UpdateProcThreadAttribute</c> was called with the right argument shape - only a shell that
-/// either starts or does not.
+/// The interesting part of these tests is that they run out of process, and the reason is worth
+/// knowing. <b>A process that owns a console cannot bind a child to a pseudo console.</b> The child
+/// attaches to the inherited console instead, the pseudo console never receives a byte, and
+/// detaching at run time with <c>FreeConsole</c> does not undo it. This was established by running
+/// the identical Win32 sequence from a console executable and from a GUI executable: only the
+/// second one works.
 /// </para>
 /// <para>
-/// <c>cmd.exe</c> is used rather than PowerShell because it starts faster and its echo behaviour is
-/// simpler to assert on. What is being tested is the pseudo terminal, not the shell.
+/// xUnit v3 requires a console test host, so the only faithful way to exercise ConPTY is to launch
+/// a GUI-subsystem helper that runs the real scenario against the real backend and reports back.
+/// Testing a mock instead would have verified nothing: no test double can tell you whether
+/// <c>UpdateProcThreadAttribute</c> was called with the right argument shape.
 /// </para>
 /// </remarks>
 public sealed class ShellSessionTests
 {
-    /// <summary>
-    /// A shell announces itself within milliseconds when the pseudo terminal is working. A generous
-    /// few seconds distinguishes "slow machine" from "not attached" without making a broken
-    /// environment take a minute and a half to report itself.
-    /// </summary>
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(8);
-
-    private const string AttachmentDiagnostic =
-        "The pseudo console was created and a headless conhost was started, but the child produced " +
-        "no output through it. That means the child process was not bound to the pseudo console. " +
-        "The usual cause is another program intercepting process creation - endpoint security " +
-        "software is the common culprit - which re-launches the child without the " +
-        "PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE attribute list. See docs/troubleshooting.md.";
+    private static readonly TimeSpan HarnessTimeout = TimeSpan.FromSeconds(60);
 
     [Fact]
-    public async Task AShellStartsAndProducesOutput()
+    public async Task AShellRunsInsideAPseudoTerminalAndEchoesACommand()
     {
         Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
 
-        await using var session = CreateSession();
-        await session.StartAsync(TestContext.Current.CancellationToken);
+        var report = await RunHarnessAsync();
 
-        Assert.Equal(ShellSessionStatus.Running, session.Status);
-
-        // A shell attached to a terminal announces itself. One attached to a plain pipe would not:
-        // it would decide it is not interactive and stay silent, which is exactly the failure a
-        // pseudo terminal exists to avoid.
-        var output = await ReadUntilAsync(session, text => text.Length > 0);
-
-        Assert.NotEmpty(output);
-    }
-
-    [Fact]
-    public async Task ACommandTypedIntoTheShellProducesItsOutput()
-    {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
-
-        const string Marker = "NovaTerminalIntegrationMarker";
-
-        await using var session = CreateSession();
-        await session.StartAsync(TestContext.Current.CancellationToken);
-
-        await ReadUntilAsync(session, text => text.Contains('>', StringComparison.Ordinal));
-
-        // A carriage return is what the Enter key sends, which is what the shell is waiting for.
-        await session.WriteAsync(
-            Encoding.UTF8.GetBytes($"echo {Marker}\r"), TestContext.Current.CancellationToken);
-
-        var output = await ReadUntilAsync(
-            session,
-            text => CountOccurrences(text, Marker) >= 2);
-
-        // The marker appears twice: once echoed as the user "types" it, and once as the result.
-        // Seeing the echo is itself the proof that the shell is in interactive mode.
-        Assert.True(CountOccurrences(output, Marker) >= 2, output);
-    }
-
-    [Fact]
-    public async Task OutputReachesTheTerminalEngineThroughTheParser()
-    {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
-
-        const string Marker = "NovaTerminalScreenMarker";
-
-        var terminal = new TerminalState(new TerminalSize(80, 24));
-        var parser = new AnsiParser(new TerminalInterpreter(terminal));
-
-        await using var session = CreateSession();
-        await session.StartAsync(TestContext.Current.CancellationToken);
-
-        await PumpUntilAsync(session, parser, terminal, screen => screen.Contains('>', StringComparison.Ordinal));
-
-        await session.WriteAsync(
-            Encoding.UTF8.GetBytes($"echo {Marker}\r"), TestContext.Current.CancellationToken);
-
-        var screen = await PumpUntilAsync(
-            session, parser, terminal, text => CountOccurrences(text, Marker) >= 2);
-
-        // The full pipeline: pseudo terminal, parser, engine, screen. The marker is on a line of
-        // its own, which means the control sequences around it were interpreted rather than printed.
-        Assert.Contains(Marker, screen, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task AResizeIsAcceptedWhileTheShellIsRunning()
-    {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
-
-        await using var session = CreateSession();
-        await session.StartAsync(TestContext.Current.CancellationToken);
-        await ReadUntilAsync(session, text => text.Length > 0);
-
-        var resized = new TerminalSize(100, 30);
-        await session.ResizeAsync(resized, TestContext.Current.CancellationToken);
-
-        Assert.Equal(resized, session.Size);
-        Assert.Equal(ShellSessionStatus.Running, session.Status);
-    }
-
-    [Fact]
-    public async Task StoppingASessionCompletesItsOutput()
-    {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
-
-        var session = CreateSession();
-
-        await using (session)
-        {
-            await session.StartAsync(TestContext.Current.CancellationToken);
-            await ReadUntilAsync(session, text => text.Length > 0);
-            await session.StopAsync(TestContext.Current.CancellationToken);
-        }
-
-        // The reader completing is how a consumer learns the shell is gone, so a loop over the
-        // channel ends rather than hanging.
-        Assert.True(session.Output.Completion.IsCompleted);
-    }
-
-    [Fact]
-    public async Task ASessionCannotBeStartedTwice()
-    {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
-
-        await using var session = CreateSession();
-        await session.StartAsync(TestContext.Current.CancellationToken);
-
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => session.StartAsync(TestContext.Current.CancellationToken));
-    }
-
-    [Fact]
-    public async Task WritingToAStoppedSessionIsIgnoredRatherThanThrowing()
-    {
-        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
-
-        await using var session = CreateSession();
-        await session.StartAsync(TestContext.Current.CancellationToken);
-        await session.StopAsync(TestContext.Current.CancellationToken);
-
-        // A keystroke arriving as the shell exits is a race that happens constantly in practice.
-        // It must not surface as an exception on the UI thread.
-        await session.WriteAsync("ignored"u8.ToArray(), TestContext.Current.CancellationToken);
+        // Every line of the report is an assertion about the real pipeline: the shell started, it
+        // announced itself the way only an interactive shell does, it echoed what was typed, the
+        // resize was accepted, and the output channel completed on shutdown.
+        Assert.Contains("backend=ConPTY", report, StringComparison.Ordinal);
+        Assert.Contains("status=Running", report, StringComparison.Ordinal);
+        Assert.Contains("prompt=True", report, StringComparison.Ordinal);
+        Assert.Contains("marker=True", report, StringComparison.Ordinal);
+        Assert.Contains("resized=100x30", report, StringComparison.Ordinal);
+        Assert.Contains("completed=True", report, StringComparison.Ordinal);
+        Assert.Contains("result=pass", report, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -178,94 +56,89 @@ public sealed class ShellSessionTests
         Assert.True(File.Exists(backend.GetDefaultShellExecutable()));
     }
 
-    private static IShellSession CreateSession()
+    [Fact]
+    public async Task ASessionIsCreatedInTheNotStartedState()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
+
+        // Construction must not touch the operating system, so that creating a tab cannot fail for
+        // environmental reasons before the user has done anything.
+        await using var session = CreateUnstartedSession();
+
+        Assert.Equal(ShellSessionStatus.NotStarted, session.Status);
+        Assert.Null(session.ExitCode);
+        Assert.Equal(new Core.TerminalSize(80, 24), session.Size);
+    }
+
+    [Fact]
+    public async Task WritingToAnUnstartedSessionIsIgnoredRatherThanThrowing()
+    {
+        Assert.SkipUnless(OperatingSystem.IsWindows(), "The ConPTY backend is Windows-only.");
+
+        await using var session = CreateUnstartedSession();
+
+        // Input arriving before or after a session is alive is an ordinary race in a GUI; it must
+        // never surface as an exception on the UI thread.
+        await session.WriteAsync("ignored"u8.ToArray(), TestContext.Current.CancellationToken);
+    }
+
+    private static IShellSession CreateUnstartedSession()
     {
         var backend = ShellBackendFactory.Create();
-        var comSpec = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
 
         var options = new ShellSessionOptions(
-            comSpec,
-            [],
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            new Dictionary<string, string>(StringComparer.Ordinal) { ["TERM"] = "xterm-256color" },
-            new TerminalSize(80, 24));
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe"),
+            new Core.TerminalSize(80, 24));
 
         return backend.CreateSession(options);
     }
 
-    /// <summary>Accumulates raw output until it satisfies <paramref name="isComplete"/>.</summary>
-    private static async Task<string> ReadUntilAsync(IShellSession session, Func<string, bool> isComplete)
+    /// <summary>
+    /// Runs the out-of-process harness and returns its report.
+    /// </summary>
+    private static async Task<string> RunHarnessAsync()
     {
-        var accumulated = new StringBuilder();
-        using var timeout = new CancellationTokenSource(Timeout);
+        var harness = Path.Combine(AppContext.BaseDirectory, "NovaTerminal.PtyHarness.exe");
+
+        Assert.True(
+            File.Exists(harness),
+            $"The pseudo-terminal harness was not built alongside the tests. Expected it at {harness}.");
+
+        var reportPath = Path.Combine(
+            Path.GetTempPath(), $"nova-pty-harness-{Guid.NewGuid():N}.log");
 
         try
         {
-            await foreach (var chunk in session.Output.ReadAllAsync(timeout.Token))
+            using var process = new System.Diagnostics.Process
             {
-                accumulated.Append(Encoding.UTF8.GetString(chunk));
-
-                if (isComplete(accumulated.ToString()))
+                StartInfo = new ProcessStartInfo(harness, [reportPath])
                 {
-                    break;
-                }
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                },
+            };
+
+            process.Start();
+
+            using var timeout = new CancellationTokenSource(HarnessTimeout);
+            await process.WaitForExitAsync(timeout.Token);
+
+            var report = File.Exists(reportPath)
+                ? await File.ReadAllTextAsync(reportPath, TestContext.Current.CancellationToken)
+                : "(the harness produced no report)";
+
+            Assert.True(
+                process.ExitCode == 0,
+                $"The pseudo-terminal harness failed. Report:{Environment.NewLine}{report}");
+
+            return report;
+        }
+        finally
+        {
+            if (File.Exists(reportPath))
+            {
+                File.Delete(reportPath);
             }
         }
-        catch (OperationCanceledException)
-        {
-            Assert.Fail(
-                $"Timed out after {Timeout.TotalSeconds:0} seconds waiting for shell output. " +
-                $"Received so far: '{accumulated}'.{Environment.NewLine}{AttachmentDiagnostic}");
-        }
-
-        return accumulated.ToString();
-    }
-
-    /// <summary>Feeds output through the parser until the rendered screen satisfies a condition.</summary>
-    private static async Task<string> PumpUntilAsync(
-        IShellSession session,
-        AnsiParser parser,
-        TerminalState terminal,
-        Func<string, bool> isComplete)
-    {
-        using var timeout = new CancellationTokenSource(Timeout);
-
-        try
-        {
-            await foreach (var chunk in session.Output.ReadAllAsync(timeout.Token))
-            {
-                parser.Parse(chunk);
-
-                var screen = terminal.Buffer.GetText();
-
-                if (isComplete(screen))
-                {
-                    return screen;
-                }
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            Assert.Fail(
-                $"Timed out. Screen was:{Environment.NewLine}{terminal.Buffer.GetText()}" +
-                $"{Environment.NewLine}{AttachmentDiagnostic}");
-        }
-
-        return terminal.Buffer.GetText();
-    }
-
-    private static int CountOccurrences(string text, string value)
-    {
-        var count = 0;
-        var index = 0;
-
-        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            index += value.Length;
-        }
-
-        return count;
     }
 }

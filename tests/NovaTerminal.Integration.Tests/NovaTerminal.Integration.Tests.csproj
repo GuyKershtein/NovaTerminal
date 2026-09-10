@@ -1,5 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <ItemGroup>
+    <!-- Built alongside the tests so its executable lands in the test output directory. -->
+    <ProjectReference Include="../NovaTerminal.PtyHarness/NovaTerminal.PtyHarness.csproj" />
     <ProjectReference Include="../../src/NovaTerminal.Core/NovaTerminal.Core.csproj" />
     <ProjectReference Include="../../src/NovaTerminal.Terminal/NovaTerminal.Terminal.csproj" />
     <ProjectReference Include="../../src/NovaTerminal.Process/NovaTerminal.Process.csproj" />
