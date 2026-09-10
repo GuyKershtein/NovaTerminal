@@ -18,6 +18,14 @@ jobs:
   publish:
     name: Publish (${{ matrix.runtime }})
     runs-on: windows-latest
+
+    # Creating a release and attaching assets needs write access to repository contents. The
+    # default token is read-only, so without this the publish succeeds and the release step then
+    # fails with a 403. Granted on the job rather than the workflow, so it is the only thing that
+    # has it.
+    permissions:
+      contents: write
+
     strategy:
       fail-fast: false
       matrix:
