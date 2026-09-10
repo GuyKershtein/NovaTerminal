@@ -38,19 +38,18 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release -warnaserror
 
+      # Tests run through Microsoft.Testing.Platform (xUnit v3's native runner) rather than the
+      # VSTest bridge, which was observed reporting a run as fully passing while five tests failed.
       - name: Test
-        run: >
-          dotnet test --no-build --configuration Release
-          --logger "trx;LogFileName=test-results.trx"
-          --results-directory ${{ github.workspace }}/artifacts/test-results
+        run: dotnet test --no-build --configuration Release
 
-      - name: Upload test results
+      - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.os }}
-          path: ${{ github.workspace }}/artifacts/test-results
-          if-no-files-found: warn
+          name: test-logs-${{ matrix.os }}
+          path: '**/TestResults/*.log'
+          if-no-files-found: ignore
 
   code-style:
     name: Formatting and style

@@ -7,6 +7,38 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestones 5, 6 and 8: the shell
+
+Milestones 5 and 8 were implemented together: ConPTY is the only correct way to launch an
+interactive shell on Windows, so there was no intermediate step worth building.
+
+- Windows ConPTY backend: `CreatePseudoConsole`, a process/thread attribute list, and
+  `CreateProcessW`, all behind `IShellBackend` so a Unix backend can be added without touching any
+  other layer.
+- `ConPtyShellSession`: a dedicated reader thread feeding a bounded channel, so a flood of output
+  applies backpressure instead of growing memory.
+- `KeyEncoder`: the xterm key table as a pure function - arrows with and without application cursor
+  mode, function keys, navigation keys, modifier parameters, control codes, alt as an escape
+  prefix, and bracketed paste.
+- `TerminalSession`: connects shell and engine. All engine mutation happens on the UI thread, so
+  the hot path needs no locks and the renderer can never see a half-applied escape sequence.
+- Keyboard input, window title, bell and shell exit are wired through to the window.
+
+### Fixed
+
+- `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE` takes the pseudo console handle *by value*, unlike most
+  attributes, which take a pointer to the value. Passing a pointer made `CreateProcess` succeed and
+  the child then die during start-up with `STATUS_DLL_INIT_FAILED`.
+- Tests now run through Microsoft.Testing.Platform rather than the VSTest bridge, which had been
+  reporting a run as fully passing while five tests failed.
+
+### Known issue
+
+- On the development machine, child processes are not being bound to the pseudo console: the
+  headless conhost is created correctly but the child never attaches, and the shell integration
+  tests fail. An independent minimal reproduction of the documented Win32 sequence fails the same
+  way, so the cause is outside NovaTerminal - see [docs/troubleshooting.md](docs/troubleshooting.md).
+
 ### Added — Milestone 4: rendering and the terminal view
 
 - `TerminalTheme` and three built-in themes. Colours live in exactly one place; nothing in the

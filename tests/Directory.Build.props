@@ -4,15 +4,23 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
+
     <!-- xUnit v3 test projects are self-hosting executables. -->
     <OutputType>Exe</OutputType>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!--
+      Run tests through Microsoft.Testing.Platform - xUnit v3's native runner - rather than the
+      VSTest adapter. This is not a preference: the VSTest bridge was reporting a run as fully
+      passing while five failing tests went unreported, which is the worst possible failure mode
+      for a test harness. The native runner reports them.
+    -->
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <UseVSTest>false</UseVSTest>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="xunit.v3" />
-    <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
 
   <ItemGroup>

@@ -5,8 +5,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NovaTerminal.App.Logging;
+using NovaTerminal.App.Sessions;
 using NovaTerminal.Core;
 using NovaTerminal.Core.Configuration;
+using NovaTerminal.Platform;
+using NovaTerminal.Process;
 using NovaTerminal.Rendering;
 using NovaTerminal.Terminal;
 using NovaTerminal.Terminal.Parsing;
@@ -14,129 +17,220 @@ using NovaTerminal.Terminal.Parsing;
 namespace NovaTerminal.App.Views;
 
 /// <summary>
-/// The application's main window: a terminal surface and a status line.
+/// The application's main window: a terminal surface, a shell session and a status line.
 /// </summary>
 /// <remarks>
 /// Dependencies arrive through the constructor rather than being fetched from a static provider,
 /// which is what lets the terminal view be constructed in tests and, later, once per tab.
 /// </remarks>
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisposable
 {
     private readonly NovaTerminalOptions _options;
     private readonly ILogger<MainWindow> _logger;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly TerminalState _terminal;
-    private readonly TerminalInterpreter _interpreter;
-    private readonly AnsiParser _parser;
     private readonly TerminalView _view;
+
+    private TerminalSession? _session;
 
     /// <summary>
     /// Design-time constructor. The XAML previewer and the runtime XAML loader need a public
     /// parameterless constructor; at run time the application always uses the injecting overload.
     /// </summary>
     public MainWindow()
-        : this(new NovaTerminalOptions(), NullLogger<MainWindow>.Instance)
+        : this(new NovaTerminalOptions(), NullLogger<MainWindow>.Instance, NullLoggerFactory.Instance)
     {
     }
 
     /// <summary>Creates the main window with its dependencies.</summary>
     [ActivatorUtilitiesConstructor]
-    public MainWindow(NovaTerminalOptions options, ILogger<MainWindow> logger)
+    public MainWindow(NovaTerminalOptions options, ILogger<MainWindow> logger, ILoggerFactory loggerFactory)
     {
         _options = options;
         _logger = logger;
+        _loggerFactory = loggerFactory;
 
         InitializeComponent();
 
         var theme = BuiltInThemes.GetOrDefault(options.Appearance.ThemeName);
 
         _terminal = new TerminalState(options.Terminal.InitialSize);
-        _interpreter = new TerminalInterpreter(_terminal);
-        _parser = new AnsiParser(_interpreter);
 
         _view = new TerminalView(_terminal, theme, options.Appearance);
         _view.ViewportSizeChanged += OnViewportSizeChanged;
+        _view.InputProduced += OnInputProduced;
         TerminalHost.Child = _view;
 
         Background = new SolidColorBrush(
             Color.FromRgb(theme.Background.Red, theme.Background.Green, theme.Background.Blue));
 
-        _interpreter.TitleChanged += OnTitleChanged;
-
         Title = $"{AppInfo.Name} {AppInfo.Version}";
-        ShowStartupScreen();
         UpdateStatus();
+
+        Opened += OnOpened;
+        Closing += OnClosing;
 
         var size = _terminal.Size;
         _logger.WindowInitialised(size.Columns, size.Rows, options.Terminal.ScrollbackLines);
     }
 
-    /// <summary>The terminal being displayed. Exposed so later milestones can attach a shell.</summary>
+    /// <summary>The terminal being displayed.</summary>
     public TerminalState Terminal => _terminal;
 
-    /// <summary>Feeds bytes to the terminal exactly as a shell's output would arrive.</summary>
-    public void Write(ReadOnlySpan<byte> data)
+    /// <summary>The running session, once a shell has been started.</summary>
+    public TerminalSession? Session => _session;
+
+    /// <summary>Disposes the session if the window is torn down without closing normally.</summary>
+    public void Dispose()
     {
-        _parser.Parse(data);
+        _session?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _session = null;
+        GC.SuppressFinalize(this);
+    }
+
+    private async void OnOpened(object? sender, EventArgs e)
+    {
+        try
+        {
+            await StartShellAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            _logger.SessionStartFailed(exception);
+            ShowFailure(exception);
+        }
+    }
+
+    private async Task StartShellAsync()
+    {
+        var backend = ShellBackendFactory.Create(_loggerFactory);
+        var executable = _options.Shell.Executable ?? backend.GetDefaultShellExecutable();
+
+        var environment = new Dictionary<string, string>(_options.Shell.Environment, StringComparer.Ordinal)
+        {
+            // TERM is how a program discovers what the terminal can do. Claiming xterm-256color is
+            // a promise: everything that name implies has to actually work.
+            ["TERM"] = _options.Terminal.TermName,
+        };
+
+        var sessionOptions = new ShellSessionOptions(
+            executable,
+            [.. _options.Shell.Arguments],
+            _options.Shell.WorkingDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            environment,
+            _terminal.Size);
+
+        var shell = backend.CreateSession(sessionOptions);
+
+        _session = new TerminalSession(shell, _terminal, _loggerFactory.CreateLogger<TerminalSession>());
+        _session.OutputApplied += OnOutputApplied;
+        _session.TitleChanged += OnTitleChanged;
+        _session.Exited += OnSessionExited;
+
+        await _session.StartAsync().ConfigureAwait(true);
+
+        _logger.SessionCreated(shell.Id, executable, _terminal.Size.Columns, _terminal.Size.Rows);
+        _view.Focus();
+        UpdateStatus();
+    }
+
+    private async void OnClosing(object? sender, WindowClosingEventArgs e)
+    {
+        if (_session is not { } session)
+        {
+            return;
+        }
+
+        _session = null;
+        await session.DisposeAsync().ConfigureAwait(true);
+        _logger.SessionClosed(session.Shell.Id);
+    }
+
+    private void OnOutputApplied(object? sender, EventArgs e)
+    {
+        _view.InvalidateDamagedRows();
+        UpdateStatus();
+    }
+
+    private void OnSessionExited(object? sender, ShellExitedEventArgs e)
+    {
+        var reason = e.ExitCode is { } code
+            ? $"shell exited with code {code}"
+            : e.Error?.Message ?? "shell ended";
+
+        StatusText.Text = $"{reason}   close the window to finish";
         _view.InvalidateDamagedRows();
     }
 
-    private void OnTitleChanged(object? sender, string title)
-        => Title = string.IsNullOrWhiteSpace(title) ? AppInfo.Name : $"{title} — {AppInfo.Name}";
+    private async void OnInputProduced(object? sender, ReadOnlyMemory<byte> data)
+    {
+        if (_session is not { IsRunning: true } session)
+        {
+            return;
+        }
 
-    private void OnViewportSizeChanged(object? sender, TerminalSize size)
+        await session.WriteAsync(data).ConfigureAwait(true);
+    }
+
+    private void OnTitleChanged(object? sender, string title)
+        => Title = string.IsNullOrWhiteSpace(title) ? AppInfo.Name : $"{title} - {AppInfo.Name}";
+
+    private async void OnViewportSizeChanged(object? sender, TerminalSize size)
     {
         if (size == _terminal.Size)
         {
             return;
         }
 
-        _terminal.Resize(size);
+        if (_session is { } session)
+        {
+            // The engine and the pseudo console have to be resized together, and the session owns
+            // the ordering that makes that safe.
+            await session.ResizeAsync(size).ConfigureAwait(true);
+        }
+        else
+        {
+            _terminal.Resize(size);
+        }
+
         _view.InvalidateDamagedRows();
         UpdateStatus();
     }
 
     /// <summary>
-    /// Writes a demonstration screen through the real parser.
+    /// Writes a failure onto the terminal itself, in red.
     /// </summary>
     /// <remarks>
-    /// Until a shell is attached, this is how the pipeline is exercised end to end: the bytes below
-    /// travel through exactly the same parser, engine and renderer that a shell's output will.
+    /// A terminal that cannot start a shell should explain itself on its own screen rather than
+    /// closing silently: the message is the only thing the user has to go on.
     /// </remarks>
-    private void ShowStartupScreen()
+    private void ShowFailure(Exception exception)
     {
-        // "CSI" is the two-byte introducer every control sequence below starts with. Writing the
-        // banner as raw sequences keeps this honest: it is exercising the real parser, not a
-        // shortcut into the buffer.
         const string Csi = "\u001b[";
-
-        // A shell ends its lines with a carriage return and a line feed, and so does this.
         const string NewLine = "\r\n";
 
-        var banner =
-            $"{Csi}1;34mNovaTerminal {AppInfo.Version}{Csi}0m  a terminal emulator in C#" + NewLine + NewLine +
-            $"  colours      {Csi}31m red {Csi}32m green {Csi}33m yellow {Csi}34m blue " +
-            $"{Csi}35m magenta {Csi}36m cyan {Csi}0m" + NewLine +
-            $"  bright       {Csi}91m red {Csi}92m green {Csi}93m yellow {Csi}94m blue {Csi}0m" + NewLine +
-            $"  true colour  {Csi}38;2;255;110;60m gradient {Csi}38;2;120;200;255m across " +
-            $"{Csi}38;2;160;255;160m rgb {Csi}0m" + NewLine +
-            $"  attributes   {Csi}1m bold {Csi}0m{Csi}3m italic {Csi}0m{Csi}4m underline {Csi}0m" +
-            $"{Csi}7m inverse {Csi}0m{Csi}2m faint {Csi}0m{Csi}9m struck {Csi}0m" + NewLine +
-            "  wide glyphs  中文 こんにちは 🚀" + NewLine + NewLine +
-            $"{Csi}90m  Milestone 4: engine, parser and renderer are connected." + NewLine +
-            $"  A real shell arrives in Milestone 5.{Csi}0m" + NewLine;
+        var message =
+            $"{Csi}1;31mNovaTerminal could not start a shell.{Csi}0m" + NewLine + NewLine +
+            $"  {exception.Message}" + NewLine + NewLine +
+            $"{Csi}90m  See the log for details.{Csi}0m" + NewLine;
 
-        Write(Encoding.UTF8.GetBytes(banner));
+        var interpreter = new TerminalInterpreter(_terminal);
+        new AnsiParser(interpreter).Parse(Encoding.UTF8.GetBytes(message));
+        _view.InvalidateDamagedRows();
     }
 
     private void UpdateStatus()
     {
         var size = _terminal.Size;
         var metrics = _view.CellMetrics;
+        var shell = _session is { } session
+            ? $"shell {session.Shell.Id} {(session.IsRunning ? "running" : "stopped")}"
+            : "no shell";
 
         StatusText.Text =
             $"{size.Columns}x{size.Rows} cells   " +
             $"cell {metrics.Width:0.##}x{metrics.Height:0.##} px   " +
             $"theme {_options.Appearance.ThemeName}   " +
-            $"font {_options.Appearance.FontSize:0.#}pt";
+            $"{shell}";
     }
 }

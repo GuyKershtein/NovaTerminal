@@ -1,9 +1,12 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
 using NovaTerminal.Core;
 using NovaTerminal.Core.Configuration;
+using NovaTerminal.Input;
 using NovaTerminal.Rendering;
 using NovaTerminal.Terminal;
 
@@ -62,6 +65,15 @@ public sealed class TerminalView : Control
         _blinkTimer.Tick += OnBlinkTick;
     }
 
+    /// <summary>
+    /// Raised when the user produced input that should reach the shell.
+    /// </summary>
+    /// <remarks>
+    /// The view does not write to the shell itself. It reports what happened and lets the session
+    /// decide, which keeps the control usable in a window that has no shell attached at all.
+    /// </remarks>
+    public event EventHandler<ReadOnlyMemory<byte>>? InputProduced;
+
     /// <summary>Raised when the viewport's size in cells changes.</summary>
     /// <remarks>
     /// The view reports the new size rather than acting on it. Resizing the terminal means resizing
@@ -72,6 +84,14 @@ public sealed class TerminalView : Control
 
     /// <summary>The geometry of one cell, in device-independent pixels.</summary>
     public CellMetrics CellMetrics => _metrics;
+
+    /// <summary>
+    /// The engine modes that change how a key press is encoded, read at the moment of the press.
+    /// </summary>
+    public TerminalInputModes InputModes => new(
+        _terminal.ApplicationCursorKeys,
+        _terminal.ApplicationKeypad,
+        BracketedPaste: false);
 
     /// <summary>The terminal being displayed.</summary>
     public TerminalState Terminal
@@ -143,6 +163,73 @@ public sealed class TerminalView : Control
     }
 
     /// <inheritdoc />
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        base.OnKeyDown(e);
+
+        var modifiers = KeyMapping.ToTerminalModifiers(e.KeyModifiers);
+        var key = KeyMapping.ToTerminalKey(e.Key);
+
+        if (key == TerminalKey.None)
+        {
+            // Ctrl+C, Alt+F and the like never produce a text input event, so they are encoded from
+            // the key itself. Without this, a terminal could not be interrupted.
+            if (TryEncodeCharacterCombination(e.Key, modifiers, out var combination))
+            {
+                InputProduced?.Invoke(this, combination);
+                e.Handled = true;
+            }
+
+            return;
+        }
+
+        var encoded = KeyEncoder.Encode(key, modifiers, InputModes);
+
+        if (encoded is null)
+        {
+            return;
+        }
+
+        InputProduced?.Invoke(this, encoded);
+
+        // Marking the event handled stops the key also being delivered as text, and stops Avalonia
+        // treating Tab as a request to move focus out of the terminal.
+        e.Handled = true;
+    }
+
+    /// <inheritdoc />
+    protected override void OnTextInput(TextInputEventArgs e)
+    {
+        base.OnTextInput(e);
+
+        if (string.IsNullOrEmpty(e.Text))
+        {
+            return;
+        }
+
+        // Text input already reflects the keyboard layout and any dead keys, which is why typed
+        // characters are taken from here rather than reconstructed from key codes.
+        // Text input carries no modifiers: a control or alt combination never reaches it at all,
+        // which is why those are handled in OnKeyDown instead.
+        var encoded = KeyEncoder.EncodeText(e.Text);
+
+        if (encoded is null)
+        {
+            return;
+        }
+
+        InputProduced?.Invoke(this, encoded);
+        e.Handled = true;
+    }
+
+    /// <inheritdoc />
+    protected override void OnPointerPressed(PointerPressedEventArgs e)
+    {
+        base.OnPointerPressed(e);
+        Focus();
+    }
+
+    /// <inheritdoc />
     protected override Size MeasureOverride(Size availableSize) => availableSize;
 
     /// <inheritdoc />
@@ -168,6 +255,56 @@ public sealed class TerminalView : Control
     {
         _blinkTimer.Stop();
         base.OnDetachedFromVisualTree(e);
+    }
+
+    /// <summary>
+    /// Encodes a modifier combination applied to an ordinary character key.
+    /// </summary>
+    /// <remarks>
+    /// Only control and alt combinations are handled here. Plain characters, and anything involving
+    /// a keyboard layout or a dead key, come through text input instead, where the operating system
+    /// has already worked out which character was meant.
+    /// </remarks>
+    private static bool TryEncodeCharacterCombination(
+        Key key, NovaTerminal.Input.KeyModifiers modifiers, out byte[] encoded)
+    {
+        encoded = [];
+
+        var wantsControl = modifiers.HasFlag(NovaTerminal.Input.KeyModifiers.Control);
+        var wantsAlt = modifiers.HasFlag(NovaTerminal.Input.KeyModifiers.Alt);
+
+        if (!wantsControl && !wantsAlt)
+        {
+            return false;
+        }
+
+        var character = key switch
+        {
+            >= Key.A and <= Key.Z => (char)('a' + (key - Key.A)),
+            >= Key.D0 and <= Key.D9 => (char)('0' + (key - Key.D0)),
+            Key.Space => ' ',
+            Key.OemOpenBrackets => '[',
+            Key.OemCloseBrackets => ']',
+            Key.OemBackslash or Key.Oem5 => '\\',
+            Key.OemMinus => '-',
+            Key.Oem2 => '/',
+            _ => '\0',
+        };
+
+        if (character == '\0')
+        {
+            return false;
+        }
+
+        var result = KeyEncoder.EncodeText(character.ToString(), modifiers);
+
+        if (result is null)
+        {
+            return false;
+        }
+
+        encoded = result;
+        return true;
     }
 
     private void RenderRow(DrawingContext context, int row)

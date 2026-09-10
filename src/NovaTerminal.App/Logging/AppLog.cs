@@ -56,4 +56,33 @@ internal static partial class AppLog
         Level = LogLevel.Debug,
         Message = "Configuration loaded and validated.")]
     public static partial void ConfigurationLoaded(this ILogger logger);
+
+    [LoggerMessage(
+        EventId = LogEvents.SessionCreated,
+        EventName = nameof(LogEvents.SessionCreated),
+        Level = LogLevel.Information,
+        Message = "Session {SessionId} created running {Shell} at {Columns}x{Rows}.")]
+    public static partial void SessionCreated(
+        this ILogger logger, string sessionId, string shell, int columns, int rows);
+
+    [LoggerMessage(
+        EventId = LogEvents.SessionClosed,
+        EventName = nameof(LogEvents.SessionClosed),
+        Level = LogLevel.Information,
+        Message = "Session {SessionId} closed.")]
+    public static partial void SessionClosed(this ILogger logger, string sessionId);
+
+    [LoggerMessage(
+        EventId = LogEvents.UnhandledException,
+        EventName = "SessionPumpFailed",
+        Level = LogLevel.Error,
+        Message = "Session {SessionId}: the output pump stopped unexpectedly.")]
+    public static partial void SessionPumpFailed(this ILogger logger, Exception exception, string sessionId);
+
+    [LoggerMessage(
+        EventId = LogEvents.ShellStartFailed,
+        EventName = nameof(LogEvents.ShellStartFailed),
+        Level = LogLevel.Error,
+        Message = "Could not start a shell session.")]
+    public static partial void SessionStartFailed(this ILogger logger, Exception exception);
 }

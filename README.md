@@ -24,10 +24,9 @@ repository — nothing is listed as working until it is implemented and tested.
 | 2 | Virtual terminal: cells, buffer, cursor, scrolling | ✅ Done |
 | 3 | ANSI/VT parser state machine | ✅ Done |
 | 4 | Terminal view and GUI | ✅ Done |
-| 5 | Shell process launch | ⏳ Next |
-| 6 | Shell ↔ terminal wiring | ⬜ Planned |
-| 7 | Colours, cursor movement, clearing, scrolling | ⬜ Planned |
-| 8 | ConPTY backend | ⬜ Planned |
+| 5, 8 | ConPTY shell backend | ✅ Done |
+| 6 | Shell ↔ terminal wiring, keyboard input | ✅ Done |
+| 7 | Colours, cursor movement, clearing, scrolling | ⏳ Next |
 | 9 | Resize support | ⬜ Planned |
 | 10–18 | Copy/paste, scrollback, tabs, search, themes, performance, polish | ⬜ Planned |
 
