@@ -9,6 +9,8 @@ libraries underneath it.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
 
+![NovaTerminal rendering colours, attributes and wide glyphs](docs/images/novaterminal-milestone4.png)
+
 ---
 
 ## Project status
@@ -21,8 +23,8 @@ repository — nothing is listed as working until it is implemented and tested.
 | 1 | Project foundation: solution, layering, CI, tests | ✅ Done |
 | 2 | Virtual terminal: cells, buffer, cursor, scrolling | ✅ Done |
 | 3 | ANSI/VT parser state machine | ✅ Done |
-| 4 | Terminal view and GUI | ⏳ Next |
-| 5 | Shell process launch | ⬜ Planned |
+| 4 | Terminal view and GUI | ✅ Done |
+| 5 | Shell process launch | ⏳ Next |
 | 6 | Shell ↔ terminal wiring | ⬜ Planned |
 | 7 | Colours, cursor movement, clearing, scrolling | ⬜ Planned |
 | 8 | ConPTY backend | ⬜ Planned |

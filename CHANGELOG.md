@@ -7,6 +7,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — Milestone 4: rendering and the terminal view
+
+- `TerminalTheme` and three built-in themes. Colours live in exactly one place; nothing in the
+  rendering path contains a literal colour.
+- Palette entries 16-255 are computed from the standard colour cube and greyscale ramp rather than
+  stored, because they are the same in every terminal.
+- `RowRunBuilder`: coalesces each row into maximal runs of identical style, so a row of plain text
+  is one text-drawing call instead of eighty. Reuses its buffers, so a frame allocates nothing.
+- `TerminalView`, an Avalonia control that draws the render model: colours, bold, faint, italic,
+  underline, inverse, invisible and strikethrough, block/underline/bar cursors with blinking, and
+  double-width glyphs.
+- Viewport-driven resize: the window's pixel size is converted to rows and columns once, at the
+  boundary, and the engine is resized to match.
+- 23 further tests covering run coalescing and theme resolution.
+
 ### Added — Milestone 3: the ANSI/VT parser
 
 - `AnsiParser`: an escape-sequence state machine following Paul Williams' VT500 model, whose state
